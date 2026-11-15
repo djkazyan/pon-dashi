@@ -1,0 +1,9 @@
+node_modules/
+dist/
+models/
+配布用/
+診断/
+紹介動画/
+Claude outputs/
+*.ponbak
+.DS_Store

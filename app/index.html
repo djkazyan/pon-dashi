@@ -1,0 +1,337 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ポン出し</title>
+<link rel="stylesheet" href="style.css?v=0.8.0">
+</head>
+<body>
+<div class="app" id="app">
+
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-name">ポン出し</span>
+      <span class="brand-ver" id="appVersion" data-version="0.8.0">Ver. 0.8.0</span>
+      <input type="text" class="show-name" id="showName" aria-label="イベント名" maxlength="60" spellcheck="false">
+      <span class="save-status" id="saveStatus">保存済み</span>
+      <button type="button" class="btn btn-small" id="showsBtn">イベント一覧</button>
+    </div>
+    <div class="topbar-controls">
+      <div class="seg" role="group" aria-label="GOの押し方">
+        <span class="seg-label">GOの押し方</span>
+        <button type="button" class="seg-btn" id="modeSingle" aria-pressed="false">1回押し</button>
+        <button type="button" class="seg-btn" id="modeDouble" aria-pressed="true">2回押し</button>
+      </div>
+      <div class="seg" role="group" aria-label="再生中にGOした時の前の曲">
+        <span class="seg-label">再生中のGO</span>
+        <button type="button" class="seg-btn" id="transCut" aria-pressed="false">即カット</button>
+        <button type="button" class="seg-btn" id="transFade" aria-pressed="true">フェード</button>
+      </div>
+      <div class="output">
+        <label class="output-label" for="outputSelect">出力</label>
+        <select id="outputSelect" class="select">
+          <option value="default">既定の出力</option>
+        </select>
+      </div>
+      <button type="button" class="btn" id="addFilesBtn">曲を追加</button>
+      <button type="button" class="btn" id="deleteTrackBtn" title="選んでいる曲を削除（Delete キーでも）">曲を削除</button>
+      <button type="button" class="btn lock-btn" id="lockBtn" aria-pressed="false">
+        <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="10" rx="2"></rect><path d="M8 11V7a4 4 0 0 1 8 0v4"></path></svg>
+        <span id="lockLabel">本番ロック</span>
+      </button>
+      <input type="file" id="fileInput" multiple hidden
+             accept="audio/*,.wav,.wave,.mp3,.m4a,.aac,.flac,.ogg,.oga,.opus,.aif,.aiff,.mp4,.m4v,.mov">
+    </div>
+  </header>
+
+  <nav class="tabs-row" aria-label="グループ">
+    <div class="tabs" id="groupTabs"></div>
+    <button type="button" class="tab tab-add" id="addGroupBtn" aria-label="グループを追加">＋ グループ</button>
+    <button type="button" class="tab tab-bgm" id="bgmTab">
+      <span class="tab-dot is-bgm" id="bgmTabDot" hidden></span>
+      <span>BGM</span>
+    </button>
+    <div class="group-tools" id="groupTools" hidden>
+      <input type="text" class="group-name" id="groupName" aria-label="グループ名" maxlength="40" spellcheck="false">
+      <button type="button" class="btn btn-small" id="groupLeftBtn" aria-label="グループを前へ">← 前へ</button>
+      <button type="button" class="btn btn-small" id="groupRightBtn" aria-label="グループを後ろへ">後ろへ →</button>
+      <button type="button" class="btn btn-small" id="groupDeleteBtn">グループを削除</button>
+      <span class="group-total" id="groupTotal"></span>
+    </div>
+  </nav>
+
+  <div class="banner" id="focusWarning" role="alert" hidden>
+    このウィンドウが最前面ではありません。キー操作（Space／Esc）は効きません。
+  </div>
+
+  <main class="main" id="main">
+    <section class="cue-area" id="cueArea" aria-label="キューリスト">
+      <div class="empty" id="emptyState">
+        <p class="empty-title" id="emptyTitle">曲ファイルをここにドラッグ＆ドロップ</p>
+        <p class="empty-sub" id="emptySub">フォルダごと落とすと、フォルダ名のグループを作ります。ファイル名の番号順に並びます。</p>
+        <button type="button" class="btn" id="emptyAddBtn">ファイルを選ぶ</button>
+      </div>
+      <div class="bgm-view" id="bgmView" hidden>
+        <div class="bgm-head">
+          <div class="bgm-lists" id="bgmLists"></div>
+          <button type="button" class="btn btn-small" id="bgmAddList">＋ プレイリスト</button>
+        </div>
+        <div class="bgm-tools">
+          <input type="text" class="group-name" id="bgmListName" aria-label="プレイリスト名" maxlength="30" spellcheck="false">
+          <button type="button" class="btn btn-small" id="bgmShuffle" aria-pressed="false">シャッフル</button>
+          <button type="button" class="btn btn-small" id="bgmListDelete">プレイリストを削除</button>
+          <span class="group-total" id="bgmListTotal"></span>
+        </div>
+        <div class="bgm-note">BGMは全イベント共通です。曲ファイルをここにドロップすると、表示中のプレイリストに入ります。最後の曲の次は頭に戻ります。</div>
+        <div class="bgm-rows" id="bgmRows"></div>
+        <div class="bgm-actions" id="bgmActions">
+          <button type="button" class="btn btn-primary" id="bgmPlayFrom">選んだ曲から再生</button>
+          <button type="button" class="btn" id="bgmUp">上へ</button>
+          <button type="button" class="btn" id="bgmDown">下へ</button>
+          <button type="button" class="btn" id="bgmRemove">外す</button>
+        </div>
+      </div>
+      <div class="cue-table" id="cueTable" hidden>
+        <div class="cue-head">
+          <div class="c-num">#</div>
+          <div class="c-state">状態</div>
+          <div class="c-title">曲名</div>
+          <div class="c-cue">きっかけ</div>
+          <div class="c-dur">尺</div>
+          <div class="c-check">チェック</div>
+          <div class="c-after">終了後</div>
+        </div>
+        <div class="cue-rows" id="cueRows"></div>
+      </div>
+    </section>
+
+    <div class="side">
+    <aside class="detail" id="detail" aria-label="選択中の曲" hidden>
+      <div class="detail-label">選択中の曲</div>
+      <div class="detail-title" id="detailTitle"></div>
+      <dl class="detail-list" id="detailList"></dl>
+      <div class="detail-group">
+        <div class="detail-label">きっかけメモ <span class="detail-hint">種類は曲リストで選びます</span></div>
+        <input type="text" class="cue-text" id="cueText" maxlength="60" placeholder="メモ（例：「ありがとう」のセリフで）" autocomplete="off">
+      </div>
+      <div class="detail-group fold" id="rangeGroup">
+        <button type="button" class="fold-head" id="rangeFoldHead" aria-expanded="false"><span class="fold-title">再生範囲</span><span class="fold-summary"></span><span class="fold-arrow" aria-hidden="true"></span></button>
+        <div class="fold-body">
+        <div class="range-row">
+          <label class="range-field"><span>開始</span><input type="text" class="range-input" id="rangeStart" spellcheck="false" inputmode="decimal"></label>
+          <label class="range-field"><span>終了</span><input type="text" class="range-input" id="rangeEnd" spellcheck="false" inputmode="decimal"></label>
+        </div>
+        <div class="detail-row">
+          <button type="button" class="btn btn-small" id="trimHead">頭の無音を詰める</button>
+          <button type="button" class="btn btn-small" id="trimTail">末尾の無音を詰める</button>
+        </div>
+        <div class="detail-row">
+          <button type="button" class="btn btn-small" id="setInNow">今の位置を開始に</button>
+          <button type="button" class="btn btn-small" id="setOutNow">今の位置を終了に</button>
+          <button type="button" class="btn btn-small" id="rangeReset">範囲を戻す</button>
+        </div>
+        </div>
+      </div>
+      <div class="detail-group fold" id="vocalGroup">
+        <button type="button" class="fold-head" id="vocalFoldHead" aria-expanded="false"><span class="fold-title">ボーカル</span><span class="fold-summary"></span><span class="fold-arrow" aria-hidden="true"></span></button>
+        <div class="fold-body">
+        <p class="vocal-note" id="vocalNote"></p>
+        <div class="vocal-progress" id="vocalProgress" hidden><div class="vocal-progress-bar" id="vocalProgressBar"></div></div>
+        <div class="vocal-slider-row" id="vocalSliderRow" hidden>
+          <input type="range" class="vocal-range" id="vocalLevel" min="0" max="100" step="5" value="100" aria-label="ボーカルの量">
+          <span class="vocal-value" id="vocalValue"></span>
+        </div>
+        <div class="detail-row">
+          <button type="button" class="btn btn-small" id="vocalSeparate">ボーカルを分ける</button>
+          <button type="button" class="btn btn-small" id="vocalSeparateGroup">このグループをまとめて</button>
+          <button type="button" class="btn btn-small" id="vocalCancel" hidden>中止</button>
+        </div>
+        <div class="detail-row" id="vocalAfter" hidden>
+          <button type="button" class="btn btn-small" id="vocalReset">100%に戻す</button>
+          <button type="button" class="btn btn-small" id="vocalRemove">分けたボーカルを消す</button>
+        </div>
+        </div>
+      </div>
+      <div class="detail-actions">
+        <button type="button" class="btn btn-primary" id="standbyBtn">スタンバイにする</button>
+        <div class="detail-row">
+          <button type="button" class="btn" id="moveUpBtn">上へ</button>
+          <button type="button" class="btn" id="moveDownBtn">下へ</button>
+          <button type="button" class="btn" id="removeBtn">削除</button>
+        </div>
+        <label class="move-group">
+          <span>グループ</span>
+          <select id="moveGroupSelect" aria-label="この曲のグループ"></select>
+        </label>
+      </div>
+    </aside>
+
+    <section class="se-panel" id="sePanel" aria-label="SEパッド">
+      <div class="se-head">
+        <span class="se-title">SEパッド</span>
+        <div class="seg" role="group" aria-label="SEのバンク">
+          <button type="button" class="seg-btn seg-small" id="seBankEvent" aria-pressed="true">イベント</button>
+          <button type="button" class="seg-btn seg-small" id="seBankCommon" aria-pressed="false">共通</button>
+        </div>
+        <span class="se-spacer"></span>
+        <button type="button" class="btn btn-small" id="seStopAll">SE停止</button>
+        <button type="button" class="btn btn-small" id="seEditBtn" aria-pressed="false">編集</button>
+      </div>
+      <div class="se-volume">
+        <label class="seg-label" for="seVolume">SE音量</label>
+        <input type="range" class="se-volume-range" id="seVolume" min="-24" max="12" step="0.5" value="0">
+        <button type="button" class="se-volume-value" id="seVolumeValue" title="押すと 0 dB に戻ります">0.0 dB</button>
+      </div>
+      <div class="se-grid" id="seGrid"></div>
+      <div class="se-editor" id="seEditor" hidden>
+        <div class="se-editor-empty" id="seEditorEmpty">パッドを選んでください。空のパッドを押すとファイルを選べます。ファイルをパッドにドロップしても割り当てられます。</div>
+        <div class="se-editor-body" id="seEditorBody" hidden>
+          <input type="text" class="group-name se-name" id="seName" aria-label="SEの名前" maxlength="30" spellcheck="false">
+          <div class="seg" role="group" aria-label="もう一度押した時">
+            <span class="seg-label">もう一度押すと</span>
+            <button type="button" class="seg-btn seg-small" id="seRetapStop" aria-pressed="true">止める</button>
+            <button type="button" class="seg-btn seg-small" id="seRetapRestart" aria-pressed="false">頭から</button>
+            <button type="button" class="seg-btn seg-small" id="seRetapOverlap" aria-pressed="false">重ねる</button>
+          </div>
+          <div class="detail-row">
+            <button type="button" class="btn btn-small" id="seReplace">ファイルを差し替え</button>
+            <button type="button" class="btn btn-small" id="seClear">パッドを空にする</button>
+          </div>
+          <div class="se-file" id="seFile"></div>
+        </div>
+      </div>
+      <input type="file" id="seFileInput" multiple hidden
+             accept="audio/*,.wav,.wave,.mp3,.m4a,.aac,.flac,.ogg,.oga,.opus,.mp4,.m4v,.mov">
+    </section>
+
+    <section class="se-panel bgm-panel" id="bgmPanel" aria-label="BGM">
+      <div class="se-head">
+        <span class="se-title">BGM</span>
+        <select class="select select-small" id="bgmListSelect" aria-label="再生するプレイリスト"></select>
+        <span class="se-spacer"></span>
+        <button type="button" class="btn btn-small bgm-play" id="bgmPlayBtn">▶ 再生</button>
+        <button type="button" class="btn btn-small" id="bgmNextBtn">次の曲</button>
+      </div>
+      <div class="bgm-now">
+        <span class="bgm-now-title" id="bgmNowTitle">停止中</span>
+        <span class="bgm-now-time" id="bgmNowTime"></span>
+      </div>
+      <div class="bgm-progress"><div class="bgm-bar" id="bgmBar"></div></div>
+      <div class="se-volume">
+        <label class="seg-label" for="bgmVolume">BGM音量</label>
+        <input type="range" class="se-volume-range" id="bgmVolume" min="-30" max="12" step="0.5" value="0">
+        <button type="button" class="se-volume-value" id="bgmVolumeValue" title="押すと 0 dB に戻ります">0.0 dB</button>
+      </div>
+      <button type="button" class="toggle" id="bgmAutoFade" aria-pressed="true">本編のGOでBGMをフェードアウト</button>
+    </section>
+
+    </div>
+  </main>
+
+  <footer class="transport">
+    <div class="wave-row">
+      <div class="wave-wrap" id="waveWrap">
+        <canvas class="wave" id="wave" height="72"></canvas>
+        <div class="wave-hover" id="waveHover" hidden></div>
+      </div>
+      <div class="seek" id="seekButtons" role="group" aria-label="再生位置の移動">
+        <button type="button" class="btn btn-small" id="seekBack60">−1分</button>
+        <button type="button" class="btn btn-small" id="seekBack10">−10秒</button>
+        <button type="button" class="btn btn-small" id="seekFwd10">＋10秒</button>
+        <button type="button" class="btn btn-small" id="seekFwd60">＋1分</button>
+      </div>
+    </div>
+    <div class="transport-row">
+
+      <div class="now">
+        <div class="now-main">
+          <div class="now-head">
+            <span class="badge" id="nowBadge">停止中</span>
+            <span class="now-group" id="nowGroup"></span>
+            <span class="now-title" id="nowTitle">—</span>
+          </div>
+          <div class="now-sub" id="nowSub">--:-- / --:--</div>
+        </div>
+        <div class="remain" id="remainBox">
+          <span class="remain-label">残り</span>
+          <span class="remain-time" id="remainTime">--:--</span>
+        </div>
+      </div>
+
+      <div class="next" id="nextBox">
+        <span class="next-label" id="nextLabel">GOで出る曲</span>
+        <span class="next-head">
+          <span class="next-group" id="nextGroup"></span>
+          <span class="next-title" id="nextTitle">スタンバイなし</span>
+        </span>
+        <span class="next-cue" id="nextCue" hidden></span>
+        <span class="next-foot">
+          <span class="next-sub" id="nextSub">曲を取り込んでください</span>
+          <button type="button" class="next-reset" id="startResetBtn" hidden>頭から再生に戻す</button>
+        </span>
+      </div>
+
+      <div class="buttons">
+        <button type="button" class="go" id="goBtn" data-state="no-standby">
+          <span class="go-label" id="goLabel">GO</span>
+          <span class="go-sub" id="goSub">Space</span>
+        </button>
+        <button type="button" class="stop" id="stopBtn">
+          <span class="stop-label">STOP</span>
+          <span class="stop-sub" id="stopSub">Esc</span>
+        </button>
+        <button type="button" class="fade" id="fadeBtn">
+          <span class="fade-label"><span>フェード</span><span>アウト</span></span>
+          <span class="fade-sub">F ・ 3.0秒</span>
+        </button>
+      </div>
+
+    </div>
+  </footer>
+
+  <div class="modal-backdrop" id="deleteBackdrop" hidden>
+    <div class="modal modal-small" role="alertdialog" aria-modal="true" aria-labelledby="deleteTitle">
+      <h2 class="modal-title" id="deleteTitle">曲を削除しますか？</h2>
+      <p class="delete-name" id="deleteName"></p>
+      <p class="modal-note">取り込んだデータ（分けたボーカル・きっかけメモなども）を消します。パソコンにある元のファイルは消えません。</p>
+      <div class="modal-foot">
+        <span class="modal-foot-gap"></span>
+        <button type="button" class="btn" id="deleteCancel">やめる（Esc）</button>
+        <button type="button" class="btn btn-danger" id="deleteOk">削除する（Enter）</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="showsBackdrop" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="showsTitle">
+      <div class="modal-head">
+        <h2 class="modal-title" id="showsTitle">イベント一覧</h2>
+        <button type="button" class="btn btn-small" id="showsClose">閉じる</button>
+      </div>
+      <p class="modal-note">曲データごと保存されています。元のファイルを消しても鳴ります。別のパソコンやアプリ版へ移す時、バックアップを取る時は「書き出す」を使います。</p>
+      <div class="shows-list" id="showsList"></div>
+      <div class="modal-foot">
+        <button type="button" class="btn btn-primary" id="newShowBtn">新しいイベント</button>
+        <span class="modal-foot-gap"></span>
+        <button type="button" class="btn btn-small" id="exportShowBtn" title="開いているイベントを、曲とSEのファイルごと1つのファイルに書き出します">このイベントを書き出す</button>
+        <button type="button" class="btn btn-small" id="exportAllBtn" title="全イベントと共通SE・BGMを、ファイルごと書き出します（バックアップ用）">すべて書き出す</button>
+        <button type="button" class="btn btn-small" id="importBtn" title="書き出したファイル（.ponbak）を読み込みます">読み込む…</button>
+        <input type="file" id="importInput" accept=".ponbak" hidden>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast" role="status" hidden></div>
+  <div class="drop-overlay" id="dropOverlay" hidden>
+    <div class="drop-overlay-inner">ここにドロップして取り込み</div>
+  </div>
+</div>
+
+<script src="cue-engine.js?v=0.8.0"></script>
+<script src="store.js?v=0.8.0"></script>
+<script src="audio-engine.js?v=0.8.0"></script>
+<script src="backup.js?v=0.8.0"></script>
+<script src="app.js?v=0.8.0"></script>
+</body>
+</html>

@@ -1,0 +1,74 @@
+{
+  "name": "pon-dashi",
+  "productName": "ポン出し",
+  "version": "0.8.0",
+  "description": "音響現場用のポン出しソフト",
+  "author": "HK SOUND",
+  "private": true,
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test test/cue-engine.test.js test/backup.test.js test/version.test.js",
+    "build:mac": "electron-builder --mac --publish never"
+  },
+  "devDependencies": {
+    "electron": "45.3.2",
+    "electron-builder": "26.0.12"
+  },
+  "build": {
+    "appId": "jp.hksound.pondashi",
+    "productName": "PonDashi",
+    "artifactName": "PonDashi-${version}-${arch}.${ext}",
+    "files": [
+      "main.js",
+      "preload.js",
+      "sep-worker.js",
+      "app/**/*",
+      "package.json",
+      "node_modules/onnxruntime-node/**/*",
+      "node_modules/onnxruntime-common/**/*",
+      "!node_modules/onnxruntime-node/bin/napi-v6/linux/**",
+      "!node_modules/onnxruntime-node/bin/napi-v6/win32/**",
+      "!node_modules/onnxruntime-node/bin/napi-v6/darwin/x64/**"
+    ],
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "afterPack": "build/after-pack.js",
+    "mac": {
+      "target": [
+        "dmg"
+      ],
+      "category": "public.app-category.music",
+      "icon": "build/icon.png",
+      "identity": null,
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false,
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "出力デバイスの名前を表示するために使います。録音はしません。",
+        "CFBundleDisplayName": "ポン出し"
+      }
+    },
+    "dmg": {
+      "title": "PonDashi ${version}"
+    },
+    "asarUnpack": [
+      "sep-worker.js",
+      "node_modules/onnxruntime-node/**/*",
+      "node_modules/onnxruntime-common/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "models",
+        "to": "models",
+        "filter": [
+          "*.onnx"
+        ]
+      }
+    ]
+  },
+  "dependencies": {
+    "onnxruntime-node": "1.31.1"
+  }
+}
