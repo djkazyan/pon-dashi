@@ -9,7 +9,8 @@
   "scripts": {
     "start": "electron .",
     "test": "node --test test/cue-engine.test.js test/backup.test.js test/version.test.js",
-    "build:mac": "electron-builder --mac --publish never"
+    "build:mac": "electron-builder --mac --publish never",
+    "build:win": "electron-builder --win --publish never"
   },
   "devDependencies": {
     "electron": "45.3.2",
@@ -27,9 +28,7 @@
       "package.json",
       "node_modules/onnxruntime-node/**/*",
       "node_modules/onnxruntime-common/**/*",
-      "!node_modules/onnxruntime-node/bin/napi-v6/linux/**",
-      "!node_modules/onnxruntime-node/bin/napi-v6/win32/**",
-      "!node_modules/onnxruntime-node/bin/napi-v6/darwin/x64/**"
+      "!node_modules/onnxruntime-node/bin/napi-v6/linux/**"
     ],
     "directories": {
       "output": "dist",
@@ -48,7 +47,11 @@
       "extendInfo": {
         "NSMicrophoneUsageDescription": "出力デバイスの名前を表示するために使います。録音はしません。",
         "CFBundleDisplayName": "ポン出し"
-      }
+      },
+      "files": [
+        "!node_modules/onnxruntime-node/bin/napi-v6/win32/**",
+        "!node_modules/onnxruntime-node/bin/napi-v6/darwin/x64/**"
+      ]
     },
     "dmg": {
       "title": "PonDashi ${version}"
@@ -66,7 +69,34 @@
           "*.onnx"
         ]
       }
-    ]
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.png",
+      "signAndEditExecutable": false,
+      "files": [
+        "!node_modules/onnxruntime-node/bin/napi-v6/darwin/**",
+        "!node_modules/onnxruntime-node/bin/napi-v6/win32/arm64/**"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": false,
+      "shortcutName": "ポン出し",
+      "uninstallDisplayName": "ポン出し",
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "artifactName": "PonDashi-Setup-${version}-win-x64.${ext}",
+      "deleteAppDataOnUninstall": false
+    }
   },
   "dependencies": {
     "onnxruntime-node": "1.31.1"
