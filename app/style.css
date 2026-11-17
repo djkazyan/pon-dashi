@@ -1081,3 +1081,5 @@ button { cursor: pointer; }
 .c-cue { flex: 0 1 230px; min-width: 100px; }
 .c-check { flex: 0 1 170px; min-width: 90px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cue-table { min-width: 760px; }
+
+.bgm-play.is-paused { border-color: var(--caution); color: var(--caution); }

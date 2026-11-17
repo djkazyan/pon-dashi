@@ -15,7 +15,7 @@
   var SEEK_SMALL = 10;          // ←→ キーと「10秒」ボタンで動かす秒数
   var SEEK_LARGE = 60;          // Shift+←→ と「1分」ボタンで動かす秒数
   var ASK_OUTPUTS = '__ask';    // 出力の選択肢「ほかの出力デバイスを表示…」
-  var APP_VERSION = '0.8.0'; // index.html の版と違えば、古いファイルが読み込まれている
+  var APP_VERSION = '0.8.1'; // index.html の版と違えば、古いファイルが読み込まれている
   var AUDIO_EXT = /\.(wav|wave|mp3|m4a|aac|flac|ogg|oga|opus|aif|aiff|mp4|m4v|mov)$/i;
   var VIDEO_EXT = /\.(mp4|m4v|mov)$/i; // 動画ファイルは音声だけ取り出して鳴らす
 
@@ -86,6 +86,7 @@
   var bgmDb = clampBgmDb(parseFloat(loadSetting('bgmVolumeDb', '0')));
   var bgmAutoFade = loadSetting('bgmAutoFade', 'on') !== 'off';
   var bgmTimer = null;
+  var bgmPaused = null;       // 一時停止中 { listId, order, index, trackId, offset }
   var confirmTimer = null;
 
   function $(id) { return document.getElementById(id); }
@@ -559,7 +560,7 @@
   // ---------- 音を出す・止める ----------
 
   function startTrack(result) {
-    if (bgmAutoFade && bgmNow && !bgmFading) bgmStop(false); // 本編のGOでBGMをフェードアウト
+    if (bgmAutoFade && bgmNow && !bgmFading) bgmPause(BGM_FADE_SECONDS); // 本編のGOでBGMをフェードアウト（一時停止。再開で続きから）
     if (current) releasePrevious(current.voice); // 再生中の曲は、設定に従って即カットかフェードアウト
     var t = tracks.get(result.trackId);
     var offset = rangeOf(t).start; // 再生範囲の開始から
@@ -2995,11 +2996,36 @@
     // 再生中なら、前の曲はフェードアウトさせて切り替える
     if (bgmNow && bgmNow.voice) fadeOutBgmVoice(bgmNow.voice, bgmFading ? 0.3 : BGM_SWITCH_SECONDS);
     bgmFading = false;
+    bgmPaused = null;
     bgmNow = { listId: list.id, order: order, index: index, trackId: null, voice: null };
     bgmPlayAt(index, 0, true);
   }
 
-  function bgmPlayAt(index, attempts, fadeIn) {
+  // 一時停止：フェードしてから止め、曲と位置を覚えておく
+  function bgmPause(fadeSeconds) {
+    var now = bgmNow;
+    if (!now || bgmFading) return;
+    var pos = now.voice ? audio.position(now.voice) : 0;
+    bgmPaused = { listId: now.listId, order: now.order, index: now.index, trackId: now.trackId, offset: pos };
+    bgmToken++;
+    if (now.voice) fadeOutBgmVoice(now.voice, fadeSeconds == null ? 1.0 : fadeSeconds);
+    bgmNow = null;
+    render();
+  }
+
+  // 一時停止したところから再開
+  function bgmResume() {
+    var p = bgmPaused;
+    if (!p) return;
+    var list = bgmList(p.listId);
+    if (!list || list.trackIds.indexOf(p.trackId) < 0) { bgmPaused = null; bgmPlay(bgmListId); return; }
+    bgmPaused = null;
+    bgmFading = false;
+    bgmNow = { listId: p.listId, order: p.order, index: p.index, trackId: null, voice: null };
+    bgmPlayAt(p.index, 0, true, p.offset);
+  }
+
+  function bgmPlayAt(index, attempts, fadeIn, offset) {
     var now = bgmNow;
     if (!now) return;
     if (attempts >= now.order.length) {
@@ -3024,6 +3050,7 @@
       if (token !== bgmToken || bgmNow !== now) return; // 途中で止めた・切り替えた
       now.voice = audio.play(buffer, {
         output: getBgmBus(),
+        offset: offset && offset < buffer.duration - 0.5 ? offset : 0,
         fadeIn: fadeIn ? BGM_FADE_IN : 0,
         onEnded: function (ended) {
           if (bgmNow !== now || now.voice !== ended) return; // 切り替え済み・フェードで手放した音
@@ -3044,6 +3071,7 @@
 
   // 停止。now=true ならすぐ止める。フェード中にもう一度押してもすぐ止める
   function bgmStop(now) {
+    bgmPaused = null; // 停止はプレイリストの頭に戻す
     if (!bgmNow) {
       bgmTails.forEach(function (v) { audio.cut(v); });
       bgmTails = [];
@@ -3111,8 +3139,13 @@
     }
     select.value = bgmListId;
     var playBtn = $('bgmPlayBtn');
-    playBtn.textContent = !bgmNow ? '▶ 再生' : bgmFading ? '■ すぐ止める' : '■ 停止';
-    playBtn.className = 'btn btn-small bgm-play' + (bgmNow ? (bgmFading ? ' is-fading' : ' is-playing') : '');
+    playBtn.textContent = bgmNow && !bgmFading ? '❚❚ 一時停止' : bgmPaused ? '▶ 再開' : '▶ 再生';
+    playBtn.className = 'btn btn-small bgm-play' + (bgmNow && !bgmFading ? ' is-playing' : bgmPaused ? ' is-paused' : '');
+    playBtn.disabled = bgmFading;
+    var stopBtn = $('bgmStopBtn');
+    stopBtn.textContent = bgmFading ? '■ すぐ止める' : '■ 停止';
+    stopBtn.className = 'btn btn-small' + (bgmFading ? ' is-fading' : '');
+    stopBtn.disabled = !bgmNow && !bgmPaused;
     $('bgmNextBtn').disabled = !bgmNow || bgmFading;
     var title = $('bgmNowTitle');
     var t = bgmNow && bgmNow.trackId ? bgmTracks.get(bgmNow.trackId) : null;
@@ -3120,6 +3153,10 @@
     if (t) {
       title.textContent = (bgmFading ? 'フェードアウト中：' : '') + (playingList ? playingList.name + '　' : '') + t.name;
       title.className = 'bgm-now-title';
+    } else if (bgmPaused && bgmTracks.get(bgmPaused.trackId)) {
+      var pl = bgmList(bgmPaused.listId);
+      title.textContent = '一時停止中：' + (pl ? pl.name + '　' : '') + bgmTracks.get(bgmPaused.trackId).name + '（' + fmtShort(bgmPaused.offset) + '）';
+      title.className = 'bgm-now-title is-idle';
     } else {
       title.textContent = bgmNow ? '読み込み中…' : '停止中';
       title.className = 'bgm-now-title is-idle';
@@ -3221,9 +3258,11 @@
       render();
     });
     $('bgmPlayBtn').addEventListener('click', function () {
-      if (bgmNow) bgmStop(false);
+      if (bgmNow) bgmPause(1.0);
+      else if (bgmPaused && bgmPaused.listId === bgmListId) bgmResume();
       else bgmPlay(bgmListId);
     });
+    $('bgmStopBtn').addEventListener('click', function () { bgmStop(false); });
     $('bgmNextBtn').addEventListener('click', bgmNext);
     $('bgmVolume').addEventListener('input', function (e) { setBgmVolume(parseFloat(e.target.value)); });
     $('bgmVolume').addEventListener('change', function (e) { e.target.blur(); });
@@ -3378,7 +3417,7 @@
     isLocked: function () { return locked; },
     tails: function () { return tails; },
     seBanks: function () { return seBanks; },
-    bgm: function () { return { lists: bgmLists, tracks: bgmTracks, listId: bgmListId, now: bgmNow, fading: bgmFading, tails: bgmTails, bus: bgmBus, view: bgmView }; },
+    bgm: function () { return { lists: bgmLists, tracks: bgmTracks, listId: bgmListId, now: bgmNow, paused: bgmPaused, fading: bgmFading, tails: bgmTails, bus: bgmBus, view: bgmView }; },
     bgmPlay: function (listId, trackId) { return bgmPlay(listId, trackId); },
     bgmStop: function (now) { return bgmStop(now); },
     bgmNext: function () { return bgmNext(); },
