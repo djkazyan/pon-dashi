@@ -15,7 +15,7 @@
   var SEEK_SMALL = 10;          // ←→ キーと「10秒」ボタンで動かす秒数
   var SEEK_LARGE = 60;          // Shift+←→ と「1分」ボタンで動かす秒数
   var ASK_OUTPUTS = '__ask';    // 出力の選択肢「ほかの出力デバイスを表示…」
-  var APP_VERSION = '0.8.1'; // index.html の版と違えば、古いファイルが読み込まれている
+  var APP_VERSION = '0.9.0'; // index.html の版と違えば、古いファイルが読み込まれている
   var AUDIO_EXT = /\.(wav|wave|mp3|m4a|aac|flac|ogg|oga|opus|aif|aiff|mp4|m4v|mov)$/i;
   var VIDEO_EXT = /\.(mp4|m4v|mov)$/i; // 動画ファイルは音声だけ取り出して鳴らす
 
@@ -707,6 +707,7 @@
         bgmView = false;
       }
     }
+    renderVideoBtn();
     var selT = selectedId && tracks.get(selectedId);
     $('deleteTrackBtn').disabled = !selT || bgmView || locked || selectedId === state.playingId;
     var vg = viewGroup();
@@ -824,7 +825,45 @@
     $('groupTotal').textContent = vg.trackIds.length + '曲 ・ 合計 ' + fmtShort(d.total) + (d.unknown ? '（確認中）' : '');
   }
 
+  // ---------- 曲名の変更（曲名をダブルクリック） ----------
+  function startRename(id, cellEl) {
+    var t = tracks.get(id);
+    if (!t) return;
+    if (locked) { toast('本番ロック中は曲名を変えられません'); return; }
+    rowSelectBusy = true; // 入力中は一覧を作り直さない
+    var input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'rename-input';
+    input.value = t.name;
+    input.maxLength = 120;
+    input.setAttribute('aria-label', '曲名');
+    cellEl.textContent = '';
+    cellEl.appendChild(input);
+    input.focus();
+    input.select();
+    var done = false;
+    function finish(save) {
+      if (done) return;
+      done = true;
+      var v = input.value.trim();
+      if (save && v && v !== t.name) { t.name = v; toast('曲名を「' + v + '」にしました'); }
+      rowSelectBusy = false;
+      listRenderPending = false;
+      afterChange();
+    }
+    input.addEventListener('keydown', function (e) {
+      e.stopPropagation();
+      if (e.isComposing || e.keyCode === 229) return; // 日本語の変換中
+      if (e.key === 'Enter') { e.preventDefault(); finish(true); input.blur(); }
+      else if (e.key === 'Escape') { e.preventDefault(); finish(false); input.blur(); }
+    });
+    input.addEventListener('blur', function () { finish(true); });
+    input.addEventListener('mousedown', function (e) { e.stopPropagation(); });
+    input.addEventListener('click', function (e) { e.stopPropagation(); });
+  }
+
   var rowSelectBusy = false;
+  var lastRowClick = { id: null, at: 0, title: false };
   var listRenderPending = false;
 
   // 一覧の中のプルダウン（きっかけ・終了後）
@@ -920,8 +959,12 @@
       }
       row.appendChild(stateCell);
 
-      var titleCell = cell('c-title', t.name);
+      var titleCell = cell('c-title', null);
+      titleCell.appendChild(cell('title-text', t.name));
+      if (isVideoTrack(t)) titleCell.appendChild(cell('video-tag', '映像'));
       if (t.vocal && t.vocal.level < 0.995) titleCell.appendChild(cell('vocal-tag', 'Vo ' + Math.round(t.vocal.level * 100) + '%'));
+      titleCell.title = locked ? '' : 'ダブルクリックで曲名を変更';
+
       row.appendChild(titleCell);
       var cueCell = cell('c-cue', null);
       cueCell.appendChild(rowSelect('row-cue k-' + (t.cue.type || 'none'), [['', '—'], ['otosaki', '音先'], ['itatsuki', '板付き'], ['furi', '曲フリ'], ['mc', 'MC'], ['other', 'その他']], t.cue.type || '', function (v) {
@@ -940,10 +983,20 @@
       row.appendChild(afterCell);
 
       // クリックは「選択」だけ。音が出るのはGOのみ
-      row.addEventListener('click', function () {
+      row.dataset.id = id;
+      row.addEventListener('click', function (e) {
+        // 曲名を素早く2回クリック → 曲名の変更（1回目のクリックで一覧が作り直されるので、自前で判定する）
+        var onTitle = !!(e.target.closest && e.target.closest('.c-title'));
+        var nowMs = Date.now();
+        var dbl = onTitle && lastRowClick.id === id && lastRowClick.title && nowMs - lastRowClick.at < 450;
+        lastRowClick = { id: id, at: dbl ? 0 : nowMs, title: onTitle };
         selectedId = id;
         row.blur();
         render();
+        if (dbl) {
+          var fresh = document.querySelector('.cue-row[data-id="' + id + '"] .c-title');
+          if (fresh) startRename(id, fresh);
+        }
       });
       // ドラッグで並べ替え（行の上に落とすとその前へ）、タブに落とすとそのグループへ
       row.draggable = !locked;
@@ -1656,6 +1709,23 @@
     $('vocalLevel').addEventListener('pointerup', function () { $('vocalLevel').blur(); });
     $('vocalReset').addEventListener('click', function () { setVocalLevel(selectedId && tracks.get(selectedId), 1); });
     $('vocalRemove').addEventListener('click', function () { removeVocal(selectedId && tracks.get(selectedId)); });
+    $('videoBtn').addEventListener('click', openVideoDialog);
+    $('videoClose').addEventListener('click', closeVideoDialog);
+    $('videoBackdrop').addEventListener('click', function (e) { if (e.target === $('videoBackdrop')) closeVideoDialog(); });
+    $('videoTarget').addEventListener('change', function (e) { setVideoTarget(e.target.value); e.target.blur(); });
+    $('videoDelay').addEventListener('change', function (e) { setVideoDelay(parseFloat(e.target.value)); e.target.blur(); });
+    $('videoDelay').addEventListener('keydown', function (e) { e.stopPropagation(); if (e.key === 'Enter') e.target.blur(); });
+    $('videoStillBtn').addEventListener('click', function () { $('videoStillInput').value = ''; $('videoStillInput').click(); });
+    $('videoStillInput').addEventListener('change', function () { var f = $('videoStillInput').files[0]; if (f) setVideoStill(f); });
+    $('videoStillClear').addEventListener('click', function () { setVideoStill(null); });
+    if (videoAvailable() && window.ponNative.video.onClosed) {
+      window.ponNative.video.onClosed(function () {
+        videoOut = { open: false, target: null, label: '' };
+        videoSent.key = null; videoSent.prepared = null;
+        renderVideoDialog(); render();
+        toast('映像出力のウィンドウが閉じました');
+      });
+    }
     $('exportShowBtn').addEventListener('click', function () { exportBackup(false); });
     $('exportAllBtn').addEventListener('click', function () { exportBackup(true); });
     $('importBtn').addEventListener('click', function () { $('importInput').value = ''; $('importInput').click(); });
@@ -2172,6 +2242,144 @@
       list.appendChild(row);
     });
     Array.prototype.forEach.call(list.querySelectorAll('button'), function (b) { b.tabIndex = -1; });
+  }
+
+  // ---------- 映像出力（アプリ版のみ） ----------
+  // 映像付きの曲（MP4 など）の映像を、外部モニターの映像出力ウィンドウに出す。音はいつもどおり本体から。
+  // 本体の再生状態を 0.25 秒ごとに見て、映像出力ウィンドウ（video.js）に指示を送る
+
+  var videoCh = ('BroadcastChannel' in window) ? new BroadcastChannel('pon-video') : null;
+  var videoOut = { open: false, target: null, label: '' }; // 映像出力ウィンドウの状態
+  var videoSent = { key: null, voice: null, fading: false, lastSync: 0, prepared: null };
+  var videoDelayMs = clampDelay(parseFloat(loadSetting('videoDelayMs', '0')));
+
+  function clampDelay(v) { return isFinite(v) ? Math.max(-1000, Math.min(1000, Math.round(v / 10) * 10)) : 0; }
+  function videoAvailable() { return !!(window.ponNative && window.ponNative.video); }
+  function isVideoTrack(t) { return !!(t && VIDEO_EXT.test(t.fileName || '')); }
+  function videoPost(m) { if (videoCh && videoOut.open) videoCh.postMessage(m); }
+
+  function videoPos() {
+    return current && current.voice ? audio.position(current.voice) : 0;
+  }
+
+  // 本体の再生状態に、映像出力を合わせる
+  function videoReconcile(force) {
+    if (!videoCh || !videoOut.open) return;
+    var t = current && tracks.get(current.trackId);
+    var vt = isVideoTrack(t) ? t : null;
+    var nowMs = Date.now();
+    if (!vt) {
+      if (videoSent.key || force) videoPost({ type: 'stop' });
+      videoSent.key = null; videoSent.voice = null; videoSent.fading = false;
+    } else if (force || videoSent.key !== vt.id || videoSent.voice !== current.voice) {
+      // 新しい曲・再生位置の移動・ループのかけ直し
+      videoSent.key = vt.id; videoSent.voice = current.voice; videoSent.fading = false; videoSent.lastSync = nowMs;
+      videoPost({ type: 'play', key: vt.id, pos: videoPos(), sentAt: nowMs });
+    } else if (current.voice.fading && !videoSent.fading) {
+      videoSent.fading = true;
+      videoPost({ type: 'fade', seconds: FADE_SECONDS });
+    } else if (!videoSent.fading && nowMs - videoSent.lastSync >= 500) {
+      videoSent.lastSync = nowMs;
+      videoPost({ type: 'sync', key: vt.id, pos: videoPos(), sentAt: nowMs });
+    }
+    // 次に出る曲が映像付きなら、先に読み込んでおいてもらう
+    var st = engine.getState(now());
+    var next = st.standbyId && tracks.get(st.standbyId);
+    var prep = isVideoTrack(next) ? next.id : null;
+    if (prep !== videoSent.prepared) {
+      videoSent.prepared = prep;
+      if (prep) videoPost({ type: 'prepare', key: prep });
+    }
+  }
+
+  if (videoCh) {
+    videoCh.onmessage = function (e) {
+      if (e.data && e.data.type === 'hello') {
+        // 映像出力ウィンドウが開いた（開き直した）→ いまの状態を送り直す
+        videoSent.prepared = null;
+        videoPost({ type: 'settings', delayMs: videoDelayMs });
+        videoReconcile(true);
+      }
+    };
+  }
+  setInterval(function () { videoReconcile(false); }, 250);
+
+  function openVideoDialog() {
+    if (!videoAvailable()) { toast('映像出力はアプリ版で使えます'); return; }
+    $('videoBackdrop').hidden = false;
+    refreshVideoTargets();
+    renderVideoDialog();
+  }
+
+  function closeVideoDialog() { $('videoBackdrop').hidden = true; }
+
+  function refreshVideoTargets() {
+    window.ponNative.video.displays().then(function (list) {
+      var sel = $('videoTarget');
+      sel.textContent = '';
+      var opts = [['', '出さない']].concat(list.map(function (d) {
+        return [String(d.id), (d.primary ? 'この画面（メイン）' : '画面 ' + d.index) + '　' + d.width + '×' + d.height];
+      })).concat([['preview', '小さいウィンドウで試す']]);
+      opts.forEach(function (o) {
+        var op = document.createElement('option');
+        op.value = o[0]; op.textContent = o[1];
+        sel.appendChild(op);
+      });
+      sel.value = videoOut.open ? String(videoOut.target) : '';
+      if (sel.value === '' && videoOut.open) sel.value = 'preview';
+    });
+  }
+
+  function setVideoTarget(value) {
+    var nv = window.ponNative.video;
+    if (!value) {
+      nv.close();
+      videoOut = { open: false, target: null, label: '' };
+      videoSent.key = null; videoSent.prepared = null;
+      renderVideoDialog(); render();
+      return;
+    }
+    nv.open(value).then(function (info) {
+      videoOut = { open: true, target: value, label: info && info.label || '' };
+      renderVideoDialog(); render();
+    }, function (err) {
+      toast('映像出力を開けませんでした：' + ((err && err.message) || ''));
+    });
+  }
+
+  function setVideoDelay(ms) {
+    videoDelayMs = clampDelay(ms);
+    saveSetting('videoDelayMs', String(videoDelayMs));
+    videoPost({ type: 'settings', delayMs: videoDelayMs });
+    videoSent.lastSync = 0; // すぐ合わせ直す
+    renderVideoDialog();
+  }
+
+  function setVideoStill(file) {
+    if (!storeOk) return;
+    var job = file ? store.putFile('video-still', file) : store.deleteFiles(['video-still']);
+    job.then(function () {
+      saveSetting('videoStillName', file ? file.name : '');
+      if (videoCh) videoCh.postMessage({ type: 'still' });
+      renderVideoDialog();
+      toast(file ? '静止画を「' + file.name + '」にしました' : '静止画を外しました（何もない時は黒）');
+    });
+  }
+
+  function renderVideoDialog() {
+    var input = $('videoDelay');
+    if (document.activeElement !== input) input.value = String(videoDelayMs);
+    var name = loadSetting('videoStillName', '');
+    $('videoStillName').textContent = name || 'なし（黒）';
+    $('videoStillClear').disabled = !name;
+    $('videoState').textContent = videoOut.open ? '映像出力中：' + videoOut.label : '映像出力はしていません';
+  }
+
+  function renderVideoBtn() {
+    var b = $('videoBtn');
+    b.hidden = !videoAvailable();
+    b.classList.toggle('is-on', videoOut.open);
+    $('videoBtnLabel').textContent = videoOut.open ? '映像出力中' : '映像出力';
   }
 
   // ---------- ボーカル調整（アプリ版のみ） ----------

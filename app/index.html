@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ポン出し</title>
-<link rel="stylesheet" href="style.css?v=0.8.1">
+<link rel="stylesheet" href="style.css?v=0.9.0">
 </head>
 <body>
 <div class="app" id="app">
@@ -12,7 +12,7 @@
   <header class="topbar">
     <div class="brand">
       <span class="brand-name">ポン出し</span>
-      <span class="brand-ver" id="appVersion" data-version="0.8.1">Ver. 0.8.1</span>
+      <span class="brand-ver" id="appVersion" data-version="0.9.0">Ver. 0.9.0</span>
       <input type="text" class="show-name" id="showName" aria-label="イベント名" maxlength="60" spellcheck="false">
       <span class="save-status" id="saveStatus">保存済み</span>
       <button type="button" class="btn btn-small" id="showsBtn">イベント一覧</button>
@@ -34,6 +34,7 @@
           <option value="default">既定の出力</option>
         </select>
       </div>
+      <button type="button" class="btn video-btn" id="videoBtn" hidden><span id="videoBtnLabel">映像出力</span></button>
       <button type="button" class="btn" id="addFilesBtn">曲を追加</button>
       <button type="button" class="btn" id="deleteTrackBtn" title="選んでいる曲を削除（Delete キーでも）">曲を削除</button>
       <button type="button" class="btn lock-btn" id="lockBtn" aria-pressed="false">
@@ -291,6 +292,24 @@
     </div>
   </footer>
 
+  <div class="modal-backdrop" id="videoBackdrop" hidden>
+    <div class="modal modal-small" role="dialog" aria-modal="true" aria-labelledby="videoTitle">
+      <div class="modal-head">
+        <h2 class="modal-title" id="videoTitle">映像出力</h2>
+        <button type="button" class="btn btn-small" id="videoClose">閉じる</button>
+      </div>
+      <p class="modal-note">映像付きの曲（MP4 など）の映像を、外部モニターに出します。音はいつもどおり「出力」から出ます。</p>
+      <label class="video-field"><span>出力先</span><select id="videoTarget" class="select"></select></label>
+      <div class="video-field"><span>何もない時</span><span class="video-still-name" id="videoStillName">なし（黒）</span>
+        <button type="button" class="btn btn-small" id="videoStillBtn">画像を選ぶ</button>
+        <button type="button" class="btn btn-small" id="videoStillClear">外す</button>
+        <input type="file" id="videoStillInput" accept="image/*" hidden></div>
+      <label class="video-field"><span>映像を早める</span><input type="number" id="videoDelay" class="video-delay" step="10" min="-1000" max="1000"><span class="video-unit">ミリ秒</span></label>
+      <p class="modal-note">モニターやプロジェクターで映像が音より遅れて見える時は、プラスにして合わせます（例：80）。</p>
+      <p class="video-state" id="videoState"></p>
+    </div>
+  </div>
+
   <div class="modal-backdrop" id="deleteBackdrop" hidden>
     <div class="modal modal-small" role="alertdialog" aria-modal="true" aria-labelledby="deleteTitle">
       <h2 class="modal-title" id="deleteTitle">曲を削除しますか？</h2>
@@ -329,10 +348,10 @@
   </div>
 </div>
 
-<script src="cue-engine.js?v=0.8.1"></script>
-<script src="store.js?v=0.8.1"></script>
-<script src="audio-engine.js?v=0.8.1"></script>
-<script src="backup.js?v=0.8.1"></script>
-<script src="app.js?v=0.8.1"></script>
+<script src="cue-engine.js?v=0.9.0"></script>
+<script src="store.js?v=0.9.0"></script>
+<script src="audio-engine.js?v=0.9.0"></script>
+<script src="backup.js?v=0.9.0"></script>
+<script src="app.js?v=0.9.0"></script>
 </body>
 </html>

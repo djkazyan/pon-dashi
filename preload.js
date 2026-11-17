@@ -17,5 +17,12 @@ contextBridge.exposeInMainWorld('ponNative', {
   },
   cancelVocals(id) {
     ipcRenderer.send('vocal-cancel', id);
+  },
+  // 映像出力
+  video: {
+    displays() { return ipcRenderer.invoke('video-displays'); },
+    open(target) { return ipcRenderer.invoke('video-open', target); },
+    close() { return ipcRenderer.invoke('video-close'); },
+    onClosed(fn) { ipcRenderer.on('video-closed', () => fn()); }
   }
 });

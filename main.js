@@ -34,6 +34,7 @@ function createWindow() {
       backgroundThrottling: false
     }
   });
+  mainWindow.on('closed', () => { closeVideoWindow(); mainWindow = null; });
 
   mainWindow.loadFile(path.join(__dirname, 'app', 'index.html'));
 
@@ -122,6 +123,65 @@ ipcMain.on('vocal-cancel', (event, id) => {
 });
 
 // メニュー。再読み込み（Cmd+R）は誤操作で音が止まるので入れない
+// ---------- 映像出力ウィンドウ ----------
+// 外部モニターに、映像付きの曲の映像だけを全画面で出す。中身は app/video.html（本体と同じ保存領域を読む）
+let videoWindow = null;
+
+function displayList() {
+  const primary = screen.getPrimaryDisplay();
+  return screen.getAllDisplays().map((d, i) => ({
+    id: d.id, index: i + 1, primary: d.id === primary.id,
+    width: d.size.width, height: d.size.height
+  }));
+}
+
+function closeVideoWindow() {
+  if (videoWindow && !videoWindow.isDestroyed()) videoWindow.destroy();
+  videoWindow = null;
+}
+
+function openVideoWindow(target) {
+  closeVideoWindow();
+  const preview = target === 'preview';
+  let display = null;
+  if (!preview) {
+    display = screen.getAllDisplays().find((d) => String(d.id) === String(target));
+    if (!display) throw new Error('その画面が見つかりません');
+  }
+  const b = preview ? null : display.bounds;
+  videoWindow = new BrowserWindow({
+    x: preview ? undefined : b.x, y: preview ? undefined : b.y,
+    width: preview ? 640 : b.width, height: preview ? 360 : b.height,
+    frame: preview, resizable: preview, movable: true,
+    backgroundColor: '#000000', show: false, title: 'ポン出し 映像出力',
+    skipTaskbar: !preview, focusable: preview, hasShadow: preview,
+    autoHideMenuBar: true,
+    webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, backgroundThrottling: false }
+  });
+  if (!preview) {
+    videoWindow.setBounds(b);
+    videoWindow.setAlwaysOnTop(true, 'screen-saver'); // メニューバー・タスクバーより上に
+    videoWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  }
+  videoWindow.setMenu(null);
+  videoWindow.loadFile(path.join(__dirname, 'app', 'video.html'), { hash: preview ? 'preview' : '' });
+  videoWindow.once('ready-to-show', () => {
+    if (!videoWindow) return;
+    videoWindow.showInactive(); // 本体のウィンドウからフォーカスを奪わない（Space で GO できるように）
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.focus();
+  });
+  const win = videoWindow;
+  videoWindow.on('closed', () => {
+    if (videoWindow === win) videoWindow = null;
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('video-closed');
+  });
+  return { label: preview ? '小さいウィンドウ' : (display.id === screen.getPrimaryDisplay().id ? 'この画面' : '画面 ' + (screen.getAllDisplays().indexOf(display) + 1)) + '（' + display.size.width + '×' + display.size.height + '）' };
+}
+
+ipcMain.handle('video-displays', () => displayList());
+ipcMain.handle('video-open', (event, target) => openVideoWindow(target));
+ipcMain.handle('video-close', () => { closeVideoWindow(); return true; });
+
 // ---------- 画面（ディスプレイ）まわり ----------
 // macOS は、ウィンドウの大部分がある画面で最大化・フルスクリーンにする。
 // 2つの画面にまたがっていると、思っていない方の画面で大きくなるので、
@@ -218,6 +278,13 @@ function buildMenu() {
 }
 
 app.whenReady().then(() => {
+  // 映像出力中の画面が外されたら、映像出力を閉じる
+  screen.on('display-removed', () => {
+    if (!videoWindow) return;
+    const b = videoWindow.getBounds();
+    const still = screen.getAllDisplays().some((d) => b.x >= d.bounds.x && b.x < d.bounds.x + d.bounds.width && b.y >= d.bounds.y && b.y < d.bounds.y + d.bounds.height);
+    if (!still) closeVideoWindow();
+  });
   // 出力デバイスの一覧取得と切り替えを許可する（それ以外の権限要求は断る）
   const allowed = new Set(['media', 'speaker-selection']);
   session.defaultSession.setPermissionRequestHandler((webContents, permission, callback) => {

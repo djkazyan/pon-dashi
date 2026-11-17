@@ -1083,3 +1083,17 @@ button { cursor: pointer; }
 .cue-table { min-width: 760px; }
 
 .bgm-play.is-paused { border-color: var(--caution); color: var(--caution); }
+
+/* 映像出力・曲名の変更（0.9.0） */
+.video-btn.is-on { border-color: var(--play); color: var(--play); }
+.video-field { display: flex; align-items: center; gap: 10px; margin: 10px 0; font-size: 13px; }
+.video-field > span:first-child { flex: 0 0 6.5em; color: var(--muted); }
+.video-field .select { flex: 1 1 auto; }
+.video-still-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.video-delay { width: 90px; padding: 6px 8px; border-radius: 6px; border: 1px solid var(--line); background: var(--bg); color: var(--text); font-size: 13px; }
+.video-unit { color: var(--muted); }
+.video-state { margin: 12px 0 0; font-size: 13px; color: var(--play); }
+.video-tag { display: inline-block; margin-left: 6px; padding: 0 5px; border-radius: 3px; font-size: 11px; border: 1px solid var(--play); color: var(--play); vertical-align: 1px; }
+.c-title { display: flex; align-items: center; min-width: 0; }
+.c-title .title-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.rename-input { width: 100%; box-sizing: border-box; padding: 4px 8px; border-radius: 6px; border: 1px solid var(--accent-hi); background: var(--bg); color: var(--text); font: inherit; }
