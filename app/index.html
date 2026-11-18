@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ポン出し</title>
-<link rel="stylesheet" href="style.css?v=0.10.0">
+<link rel="stylesheet" href="style.css?v=0.10.1">
 </head>
 <body>
 <div class="app" id="app">
@@ -12,7 +12,7 @@
   <header class="topbar">
     <div class="brand">
       <span class="brand-name">ポン出し</span>
-      <span class="brand-ver" id="appVersion" data-version="0.10.0">Ver. 0.10.0</span>
+      <span class="brand-ver" id="appVersion" data-version="0.10.1">Ver. 0.10.1</span>
       <button type="button" class="btn btn-small update-btn" id="updateBtn" hidden>新しい版があります</button>
       <input type="text" class="show-name" id="showName" aria-label="イベント名" maxlength="60" spellcheck="false">
       <span class="save-status" id="saveStatus">保存済み</span>
@@ -37,6 +37,7 @@
       </div>
       <button type="button" class="btn video-btn" id="videoBtn" hidden><span id="videoBtnLabel">映像出力</span></button>
       <button type="button" class="btn" id="addFilesBtn">曲を追加</button>
+      <button type="button" class="btn" id="cdBtn" title="音楽CDから曲を取り込む（Mac）" hidden>CD取り込み</button>
       <button type="button" class="btn" id="deleteTrackBtn" title="選んでいる曲を削除（Delete キーでも）">曲を削除</button>
       <button type="button" class="btn lock-btn" id="lockBtn" aria-pressed="false">
         <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="10" rx="2"></rect><path d="M8 11V7a4 4 0 0 1 8 0v4"></path></svg>
@@ -332,6 +333,32 @@
     </div>
   </div>
 
+  <div class="modal-backdrop" id="cdBackdrop" hidden>
+    <div class="modal modal-small" role="dialog" aria-modal="true" aria-labelledby="cdTitle">
+      <div class="modal-head">
+        <h2 class="modal-title" id="cdTitle">CDから取り込む</h2>
+        <button type="button" class="btn btn-small" id="cdClose">閉じる（Esc）</button>
+      </div>
+      <div class="cd-pick" id="cdPick" hidden>
+        <label class="seg-label" for="cdSelect">CD</label>
+        <select class="select select-small" id="cdSelect"></select>
+      </div>
+      <div class="cd-tools">
+        <button type="button" class="btn btn-small" id="cdAll">すべて選ぶ</button>
+        <button type="button" class="btn btn-small" id="cdNone">すべて外す</button>
+        <span class="cd-count" id="cdCount"></span>
+      </div>
+      <ul class="cd-list" id="cdList"></ul>
+      <button type="button" class="toggle" id="cdNewGroup" aria-pressed="true">新しいグループ（CDの名前）に入れる</button>
+      <p class="modal-note" id="cdNote">曲はアプリの中にコピーします。取り込めた曲から、すぐ再生できます。取り込みが終われば CD を出して大丈夫です。</p>
+      <p class="cd-progress" id="cdProgress" hidden></p>
+      <div class="modal-foot">
+        <button type="button" class="btn btn-small" id="cdRescan">CDを探し直す</button>
+        <span class="modal-foot-gap"></span>
+        <button type="button" class="btn btn-primary" id="cdStart">取り込む</button>
+      </div>
+    </div>
+  </div>
   <div class="modal-backdrop" id="updateBackdrop" hidden>
     <div class="modal modal-small" role="dialog" aria-modal="true" aria-labelledby="updateTitle">
       <div class="modal-head">
@@ -387,10 +414,10 @@
   </div>
 </div>
 
-<script src="cue-engine.js?v=0.10.0"></script>
-<script src="store.js?v=0.10.0"></script>
-<script src="audio-engine.js?v=0.10.0"></script>
-<script src="backup.js?v=0.10.0"></script>
-<script src="app.js?v=0.10.0"></script>
+<script src="cue-engine.js?v=0.10.1"></script>
+<script src="store.js?v=0.10.1"></script>
+<script src="audio-engine.js?v=0.10.1"></script>
+<script src="backup.js?v=0.10.1"></script>
+<script src="app.js?v=0.10.1"></script>
 </body>
 </html>

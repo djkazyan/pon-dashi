@@ -32,8 +32,73 @@
     // ファイルを最後まで展開する。壊れたファイル・非対応形式はここで失敗する。
     function decodeFile(file) {
       return file.arrayBuffer().then(function (data) {
+        // AIFF（音楽CDを Mac で開いた時の形式）はブラウザが読めないので、自前で読む
+        var aiff = null;
+        try { aiff = decodeAiff(data); } catch (e) { aiff = null; }
+        if (aiff) return aiff;
         return ensureContext().decodeAudioData(data);
       });
+    }
+
+    // AIFF / AIFC（無圧縮）を AudioBuffer にする。AIFF でなければ null
+    function decodeAiff(data) {
+      if (data.byteLength < 54) return null;
+      var v = new DataView(data);
+      function tag(o) { return String.fromCharCode(v.getUint8(o), v.getUint8(o + 1), v.getUint8(o + 2), v.getUint8(o + 3)); }
+      if (tag(0) !== 'FORM') return null;
+      var form = tag(8);
+      if (form !== 'AIFF' && form !== 'AIFC') return null;
+      var ch = 0, frames = 0, bits = 0, rate = 0, comp = 'NONE', dataStart = -1;
+      var pos = 12;
+      var end = Math.min(data.byteLength, 8 + v.getUint32(4));
+      while (pos + 8 <= end) {
+        var id = tag(pos);
+        var size = v.getUint32(pos + 4);
+        var body = pos + 8;
+        if (id === 'COMM') {
+          ch = v.getInt16(body);
+          frames = v.getUint32(body + 2);
+          bits = v.getInt16(body + 6);
+          // 80ビットの浮動小数点（サンプリング周波数）
+          var exp = ((v.getUint8(body + 8) & 0x7f) << 8) | v.getUint8(body + 9);
+          var hi = v.getUint32(body + 10), lo = v.getUint32(body + 14);
+          rate = (hi * 4294967296 + lo) * Math.pow(2, exp - 16383 - 63);
+          if (form === 'AIFC' && size >= 22) comp = tag(body + 18);
+        } else if (id === 'SSND') {
+          dataStart = body + 8 + v.getUint32(body);
+        }
+        pos = body + size + (size & 1);
+      }
+      if (!ch || !rate || dataStart < 0) return null;
+      var little = comp === 'sowt';
+      var isFloat = comp === 'fl32' || comp === 'FL32';
+      if (!(comp === 'NONE' || comp === 'twos' || little || isFloat)) throw new Error('この AIFF の圧縮形式（' + comp + '）には対応していません');
+      if (isFloat) bits = 32;
+      var bytes = bits <= 8 ? 1 : bits <= 16 ? 2 : bits <= 24 ? 3 : 4;
+      var avail = Math.floor((data.byteLength - dataStart) / (bytes * ch));
+      frames = Math.min(frames, avail);
+      if (frames <= 0) return null;
+      var buffer = ensureContext().createBuffer(ch, frames, Math.round(rate));
+      var outs = [];
+      for (var c = 0; c < ch; c++) outs.push(buffer.getChannelData(c));
+      var o = dataStart;
+      var u8 = new Uint8Array(data);
+      for (var i = 0; i < frames; i++) {
+        for (c = 0; c < ch; c++) {
+          var x;
+          if (isFloat) x = v.getFloat32(o, false);
+          else if (bytes === 2) x = (little ? v.getInt16(o, true) : v.getInt16(o, false)) / 32768;
+          else if (bytes === 3) {
+            var n = little ? (u8[o] | (u8[o + 1] << 8) | (u8[o + 2] << 16)) : ((u8[o] << 16) | (u8[o + 1] << 8) | u8[o + 2]);
+            if (n & 0x800000) n -= 0x1000000;
+            x = n / 8388608;
+          } else if (bytes === 1) x = v.getInt8(o) / 128;
+          else x = (little ? v.getInt32(o, true) : v.getInt32(o, false)) / 2147483648;
+          outs[c][i] = x;
+          o += bytes;
+        }
+      }
+      return buffer;
     }
 
     // 尺・頭と末尾の無音・波形を調べる。
@@ -472,6 +537,7 @@
     return {
       ensureContext: ensureContext,
       decodeFile: decodeFile,
+      decodeAiff: decodeAiff,
       analyze: analyze,
       play: play,
       createBus: createBus,

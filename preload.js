@@ -25,6 +25,12 @@ contextBridge.exposeInMainWorld('ponNative', {
     close() { return ipcRenderer.invoke('video-close'); },
     onClosed(fn) { ipcRenderer.on('video-closed', () => fn()); }
   },
+  // 音楽CDから取り込む（Mac のみ）
+  cd: {
+    supported() { return ipcRenderer.invoke('cd-supported'); },
+    list() { return ipcRenderer.invoke('cd-list'); },
+    read(dir, file) { return ipcRenderer.invoke('cd-read', dir, file); }
+  },
   // 新しい版のお知らせ（調べるだけ。ダウンロードは配布ページから）
   update: {
     check() { return ipcRenderer.invoke('update-check'); },

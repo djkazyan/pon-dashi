@@ -1116,3 +1116,19 @@ button { cursor: pointer; }
 .bgm-out-warn { margin: 4px 0; padding: 6px 8px; border-radius: 6px; font-size: 12px; font-weight: 700;
   color: #1a0b08; background: var(--danger); }
 .bgm-panel.is-out-lost { border-color: var(--danger); }
+
+/* CDから取り込む（Ver. 0.10.1） */
+.cd-pick { display: flex; align-items: center; gap: 8px; margin: 4px 0 8px; }
+.cd-pick .select { flex: 1; min-width: 0; }
+.cd-tools { display: flex; align-items: center; gap: 6px; margin: 4px 0 6px; }
+.cd-count { margin-left: auto; font-size: 12px; color: var(--muted); }
+.cd-list { list-style: none; margin: 0 0 10px; padding: 4px; max-height: 300px; overflow: auto; background: var(--raised); border: 1px solid var(--line); border-radius: 8px; }
+.cd-list li { display: flex; align-items: center; gap: 8px; padding: 5px 8px; border-radius: 5px; font-size: 13px; }
+.cd-list li:hover { background: rgba(255, 255, 255, .04); }
+.cd-list label { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; cursor: pointer; }
+.cd-list .cd-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cd-list .cd-size, .cd-list .cd-state { flex: none; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.cd-list .cd-state.is-done { color: var(--play); }
+.cd-list .cd-state.is-error { color: var(--danger); }
+.cd-list .cd-state.is-busy { color: var(--accent-hi); }
+.cd-progress { margin: 0 0 8px; font-size: 13px; font-weight: 700; color: var(--accent-hi); }

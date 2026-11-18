@@ -183,6 +183,54 @@ ipcMain.handle('video-open', (event, target) => openVideoWindow(target));
 ipcMain.handle('video-close', () => { closeVideoWindow(); return true; });
 
 // ---------- 画面（ディスプレイ）まわり ----------
+// ---- 音楽CDから取り込む（Mac のみ） ----
+// macOS は音楽CDを入れると /Volumes/<CD名>/ に「1 曲名.aiff」のようなファイルとして見せる。
+// それを読んで画面側に渡す（画面側で AIFF を読み、アプリの中にコピーする）。
+const CD_ROOT = process.env.PON_CD_ROOT || '/Volumes';
+const CD_AIFF = /\.aiff?$/i;
+
+function cdSupported() {
+  return process.platform === 'darwin' || !!process.env.PON_CD_ROOT;
+}
+
+async function listAudioCds() {
+  if (!cdSupported()) return [];
+  const fsp = require('fs').promises;
+  const pathMod = require('path');
+  let vols = [];
+  try { vols = await fsp.readdir(CD_ROOT, { withFileTypes: true }); } catch (e) { return []; }
+  const cds = [];
+  for (const v of vols) {
+    if (!v.isDirectory() && !v.isSymbolicLink()) continue;
+    const dir = pathMod.join(CD_ROOT, v.name);
+    let names = [];
+    try { names = await fsp.readdir(dir); } catch (e) { continue; }
+    const tracks = names.filter((n) => CD_AIFF.test(n) && !n.startsWith('.'))
+      .sort((a, b) => a.localeCompare(b, 'ja', { numeric: true }));
+    // 音楽CDは「1 〜.aiff」から始まる番号付きの AIFF だけが並ぶ
+    if (!tracks.length || !tracks.every((n) => /^\d+[ _.-]/.test(n))) continue;
+    const list = [];
+    for (const n of tracks) {
+      let size = 0;
+      try { size = (await fsp.stat(pathMod.join(dir, n))).size; } catch (e) { /* 大きさ不明 */ }
+      list.push({ file: n, size });
+    }
+    cds.push({ name: v.name, dir, tracks: list });
+  }
+  return cds;
+}
+
+ipcMain.handle('cd-supported', () => cdSupported());
+ipcMain.handle('cd-list', () => listAudioCds());
+ipcMain.handle('cd-read', async (event, dir, file) => {
+  const pathMod = require('path');
+  // 決まった場所の AIFF だけ読む
+  const full = pathMod.resolve(String(dir), String(file));
+  if (pathMod.dirname(pathMod.dirname(full)) !== pathMod.resolve(CD_ROOT) || !CD_AIFF.test(full)) throw new Error('読めない場所です');
+  const buf = await require('fs').promises.readFile(full);
+  return new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
+});
+
 // ---- 新しい版のお知らせ ----
 // GitHub の最新リリースを調べるだけ。ダウンロードと入れ替えは各自で（署名のない自作アプリのため自動更新はしない）
 const RELEASE_API = 'https://api.github.com/repos/djkazyan/pon-dashi/releases/latest';

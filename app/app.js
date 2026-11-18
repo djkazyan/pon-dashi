@@ -15,7 +15,7 @@
   var SEEK_SMALL = 10;          // ←→ キーと「10秒」ボタンで動かす秒数
   var SEEK_LARGE = 60;          // Shift+←→ と「1分」ボタンで動かす秒数
   var ASK_OUTPUTS = '__ask';    // 出力の選択肢「ほかの出力デバイスを表示…」
-  var APP_VERSION = '0.10.0'; // index.html の版と違えば、古いファイルが読み込まれている
+  var APP_VERSION = '0.10.1'; // index.html の版と違えば、古いファイルが読み込まれている
   var AUDIO_EXT = /\.(wav|wave|mp3|m4a|aac|flac|ogg|oga|opus|aif|aiff|mp4|m4v|mov)$/i;
   var LOUD_TARGET = -11;       // オートゲインの目標（LUFS）
   var GAIN_ADJ_MAX = 12;       // 曲ごとの微調整の幅（±dB）
@@ -2004,6 +2004,12 @@
         else if (e.key === 'Escape') closeDelete();
         return;
       }
+      // CD取り込みの画面を開いている間も、Esc で閉じるだけ（取り込みは裏で続く）
+      if (cdOpen()) {
+        if (e.key === 'Escape') { e.preventDefault(); closeCdDialog(); }
+        else if (e.code === 'Space' && !(e.target && e.target.tagName === 'INPUT')) e.preventDefault();
+        return;
+      }
       // アップデートの案内を開いている間は、Esc で閉じるだけ（Space で GO しない）
       if (updateOpen()) {
         if (e.key === 'Escape') { e.preventDefault(); closeUpdateDialog(); }
@@ -3824,6 +3830,163 @@
     });
   }
 
+  // ---------- 音楽CDから取り込む（Mac のアプリ版のみ、Ver. 0.10.1） ----------
+  // macOS は音楽CDを「1 曲名.aiff」というファイルとして見せるので、それを1曲ずつ読んでアプリの中にコピーする。
+  // CDから直接は鳴らさない（回り出しの遅れ・読み取りエラーで本番に音が途切れないように）。
+  var cdData = { cds: [], index: 0, checked: {}, state: {}, newGroup: true };
+  var cdJob = null; // 取り込み中 { cancel }
+
+  function cdAvailable() { return !!(window.ponNative && window.ponNative.cd); }
+  function cdOpen() { return !$('cdBackdrop').hidden; }
+  function cdTrackName(file) { return file.replace(/\.aiff?$/i, '').replace(/^\d+[ _.\-]+/, '') || file; }
+  function cdTrackNo(file) { var m = file.match(/^(\d+)/); return m ? m[1] : ''; }
+  function cdCurrent() { return cdData.cds[cdData.index] || null; }
+
+  function openCdDialog() {
+    $('cdBackdrop').hidden = false;
+    if (!cdJob) { $('cdProgress').hidden = true; $('cdProgress').textContent = ''; }
+    if (!cdJob) scanCd();
+    else renderCd();
+  }
+
+  function closeCdDialog() { $('cdBackdrop').hidden = true; }
+
+  function scanCd() {
+    $('cdList').textContent = '';
+    var li = document.createElement('li');
+    li.textContent = 'CDを探しています…';
+    $('cdList').appendChild(li);
+    return window.ponNative.cd.list().then(function (cds) {
+      var before = cdCurrent();
+      cdData.cds = cds || [];
+      cdData.index = 0;
+      var same = false;
+      if (before) cdData.cds.forEach(function (c, i) { if (c.dir === before.dir) { cdData.index = i; same = true; } });
+      var cd = cdCurrent();
+      // 同じCDなら、取り込み済みの曲は外したままにする（二重に取り込まないように）
+      if (!same) { cdData.state = {}; cdData.checked = {}; }
+      if (cd) cd.tracks.forEach(function (t) { cdData.checked[t.file] = cdData.state[t.file] !== 'done'; });
+      renderCd();
+    }, function () {
+      cdData.cds = [];
+      renderCd();
+    });
+  }
+
+  function renderCd() {
+    var cd = cdCurrent();
+    var list = $('cdList');
+    list.textContent = '';
+    var pick = $('cdSelect');
+    pick.textContent = '';
+    cdData.cds.forEach(function (c, i) { addOption(pick, String(i), c.name + '（' + c.tracks.length + '曲）'); });
+    pick.value = String(cdData.index);
+    $('cdPick').hidden = cdData.cds.length < 2;
+    $('cdTitle').textContent = cd ? 'CDから取り込む：' + cd.name : 'CDから取り込む';
+    var busy = !!cdJob;
+    if (!cd) {
+      var li = document.createElement('li');
+      li.textContent = '音楽CDが見つかりません。CDを入れて、Finder に曲が出てから「CDを探し直す」を押してください。';
+      list.appendChild(li);
+    } else {
+      cd.tracks.forEach(function (t) {
+        var item = document.createElement('li');
+        var label = document.createElement('label');
+        var box = document.createElement('input');
+        box.type = 'checkbox';
+        box.checked = !!cdData.checked[t.file];
+        box.disabled = busy;
+        box.addEventListener('change', function () { cdData.checked[t.file] = box.checked; renderCdCount(); });
+        label.appendChild(box);
+        label.appendChild(cell('cd-no', cdTrackNo(t.file)));
+        label.appendChild(cell('cd-name', cdTrackName(t.file)));
+        item.appendChild(label);
+        // CDの音は 44.1kHz・16ビット・ステレオなので、大きさから長さがわかる
+        if (t.size) item.appendChild(cell('cd-size', fmtShort(Math.max(0, t.size - 54) / 176400)));
+        var st = cdData.state[t.file];
+        var label2 = st === 'busy' ? '取り込み中…' : st === 'done' ? '取り込み済み' : st === 'error' ? '読めませんでした' : '';
+        if (label2) item.appendChild(cell('cd-state is-' + st, label2));
+        list.appendChild(item);
+      });
+    }
+    $('cdNewGroup').setAttribute('aria-pressed', String(cdData.newGroup));
+    $('cdNewGroup').textContent = '新しいグループ' + (cd ? '「' + cd.name + '」' : '（CDの名前）') + 'に入れる';
+    $('cdNewGroup').disabled = busy;
+    $('cdAll').disabled = busy || !cd;
+    $('cdNone').disabled = busy || !cd;
+    $('cdRescan').disabled = busy;
+    $('cdSelect').disabled = busy;
+    $('cdStart').textContent = busy ? '中止' : '取り込む';
+    $('cdStart').classList.toggle('btn-primary', !busy);
+    renderCdCount();
+  }
+
+  function renderCdCount() {
+    var cd = cdCurrent();
+    var n = cd ? cd.tracks.filter(function (t) { return cdData.checked[t.file]; }).length : 0;
+    $('cdCount').textContent = cd ? n + ' / ' + cd.tracks.length + '曲を選択' : '';
+    if (!cdJob) $('cdStart').disabled = !n;
+  }
+
+  function startCdImport() {
+    if (cdJob) { cdJob.cancel = true; $('cdProgress').textContent = '今の曲が終わったら止めます…'; return; }
+    var cd = cdCurrent();
+    if (!cd) return;
+    var todo = cd.tracks.filter(function (t) { return cdData.checked[t.file]; });
+    if (!todo.length) return;
+    var job = cdJob = { cancel: false };
+    var groupName = cdData.newGroup ? cd.name : null;
+    var done = 0, failed = 0, i = 0;
+    $('cdProgress').hidden = false;
+    renderCd();
+    function next() {
+      if (job.cancel || i >= todo.length) return finish();
+      var t = todo[i++];
+      cdData.state[t.file] = 'busy';
+      $('cdProgress').textContent = '取り込み中 ' + i + ' / ' + todo.length + '：' + cdTrackName(t.file);
+      if (cdOpen()) renderCd();
+      window.ponNative.cd.read(cd.dir, t.file).then(function (bytes) {
+        var name = cdTrackName(t.file) + '.aiff';
+        var file = new File([bytes], name, { type: 'audio/aiff' });
+        importItems([{ file: file, path: groupName ? '/' + groupName + '/' + name : '' }]);
+        cdData.state[t.file] = 'done';
+        cdData.checked[t.file] = false;
+        done++;
+      }, function () {
+        cdData.state[t.file] = 'error';
+        failed++;
+      }).then(function () { setTimeout(next, 0); });
+    }
+    function finish() {
+      cdJob = null;
+      $('cdProgress').textContent = (job.cancel ? '中止しました。' : '') + done + '曲を取り込みました' + (failed ? '（' + failed + '曲は読めませんでした。CDの汚れ・傷を確認してください）' : '');
+      if (cdOpen()) renderCd();
+      toast('CDから' + done + '曲を取り込みました' + (failed ? '（' + failed + '曲は読めませんでした）' : ''));
+    }
+    next();
+  }
+
+  function bindCd() {
+    if (!cdAvailable()) return;
+    window.ponNative.cd.supported().then(function (ok) { $('cdBtn').hidden = !ok; });
+    $('cdBtn').addEventListener('click', function (e) { e.currentTarget.blur(); openCdDialog(); });
+    $('cdClose').addEventListener('click', closeCdDialog);
+    $('cdBackdrop').addEventListener('click', function (e) { if (e.target === $('cdBackdrop')) closeCdDialog(); });
+    $('cdRescan').addEventListener('click', function (e) { e.currentTarget.blur(); scanCd(); });
+    $('cdSelect').addEventListener('change', function (e) {
+      cdData.index = Number(e.target.value) || 0;
+      cdData.checked = {}; cdData.state = {};
+      var cd = cdCurrent();
+      if (cd) cd.tracks.forEach(function (t) { cdData.checked[t.file] = true; });
+      renderCd();
+    });
+    $('cdAll').addEventListener('click', function () { var cd = cdCurrent(); if (cd) cd.tracks.forEach(function (t) { cdData.checked[t.file] = true; }); renderCd(); });
+    $('cdNone').addEventListener('click', function () { cdData.checked = {}; renderCd(); });
+    $('cdNewGroup').addEventListener('click', function () { if (cdJob) return; cdData.newGroup = !cdData.newGroup; saveSetting('cdNewGroup', cdData.newGroup ? '1' : '0'); renderCd(); });
+    $('cdStart').addEventListener('click', function (e) { e.currentTarget.blur(); startCdImport(); });
+    cdData.newGroup = loadSetting('cdNewGroup', '1') !== '0';
+  }
+
   // ---------- 新しい版のお知らせ（アプリ版のみ） ----------
   // 起動して少ししたら、ネットにつながっていれば GitHub の最新リリースを調べる。
   // 本番の邪魔にならないよう、勝手にダイアログは出さず、上に「新しい版があります」を出すだけ。
@@ -3939,6 +4102,7 @@
   bindSe();
   bindBgm();
   bindUpdate();
+  bindCd();
   render();
   init();
   refreshOutputs(true);
@@ -3958,6 +4122,7 @@
     audio: audio,
     bgmAudio: bgmAudio,
     bgmOutLost: function () { return bgmOutLost; },
+    cdBusy: function () { return !!cdJob; },
     tracks: tracks,
     buffers: buffers,
     importItems: importItems,
