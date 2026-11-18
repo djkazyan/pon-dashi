@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ポン出し</title>
-<link rel="stylesheet" href="style.css?v=0.9.0">
+<link rel="stylesheet" href="style.css?v=0.9.1">
 </head>
 <body>
 <div class="app" id="app">
@@ -12,7 +12,8 @@
   <header class="topbar">
     <div class="brand">
       <span class="brand-name">ポン出し</span>
-      <span class="brand-ver" id="appVersion" data-version="0.9.0">Ver. 0.9.0</span>
+      <span class="brand-ver" id="appVersion" data-version="0.9.1">Ver. 0.9.1</span>
+      <button type="button" class="btn btn-small update-btn" id="updateBtn" hidden>新しい版があります</button>
       <input type="text" class="show-name" id="showName" aria-label="イベント名" maxlength="60" spellcheck="false">
       <span class="save-status" id="saveStatus">保存済み</span>
       <button type="button" class="btn btn-small" id="showsBtn">イベント一覧</button>
@@ -310,6 +311,23 @@
     </div>
   </div>
 
+  <div class="modal-backdrop" id="updateBackdrop" hidden>
+    <div class="modal modal-small" role="dialog" aria-modal="true" aria-labelledby="updateTitle">
+      <div class="modal-head">
+        <h2 class="modal-title" id="updateTitle">アップデート</h2>
+        <button type="button" class="btn btn-small" id="updateClose">閉じる（Esc）</button>
+      </div>
+      <p class="update-ver" id="updateVer"></p>
+      <pre class="update-notes" id="updateNotes" hidden></pre>
+      <p class="modal-note" id="updateHow">配布ページから、お使いのパソコン用（Mac／Windows）をダウンロードして入れ替えてください。保存してあるイベント・SE・BGM は消えません。</p>
+      <div class="modal-foot">
+        <button type="button" class="btn btn-small" id="updateSkip">この版は知らせない</button>
+        <span class="modal-foot-gap"></span>
+        <button type="button" class="btn btn-primary" id="updateOpen">配布ページを開く</button>
+      </div>
+    </div>
+  </div>
+
   <div class="modal-backdrop" id="deleteBackdrop" hidden>
     <div class="modal modal-small" role="alertdialog" aria-modal="true" aria-labelledby="deleteTitle">
       <h2 class="modal-title" id="deleteTitle">曲を削除しますか？</h2>
@@ -348,10 +366,10 @@
   </div>
 </div>
 
-<script src="cue-engine.js?v=0.9.0"></script>
-<script src="store.js?v=0.9.0"></script>
-<script src="audio-engine.js?v=0.9.0"></script>
-<script src="backup.js?v=0.9.0"></script>
-<script src="app.js?v=0.9.0"></script>
+<script src="cue-engine.js?v=0.9.1"></script>
+<script src="store.js?v=0.9.1"></script>
+<script src="audio-engine.js?v=0.9.1"></script>
+<script src="backup.js?v=0.9.1"></script>
+<script src="app.js?v=0.9.1"></script>
 </body>
 </html>

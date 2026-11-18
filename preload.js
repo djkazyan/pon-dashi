@@ -24,5 +24,11 @@ contextBridge.exposeInMainWorld('ponNative', {
     open(target) { return ipcRenderer.invoke('video-open', target); },
     close() { return ipcRenderer.invoke('video-close'); },
     onClosed(fn) { ipcRenderer.on('video-closed', () => fn()); }
+  },
+  // 新しい版のお知らせ（調べるだけ。ダウンロードは配布ページから）
+  update: {
+    check() { return ipcRenderer.invoke('update-check'); },
+    open(which) { return ipcRenderer.invoke('update-open', which); },
+    onRequest(fn) { ipcRenderer.on('update-check-request', () => fn()); }
   }
 });

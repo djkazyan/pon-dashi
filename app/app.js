@@ -15,7 +15,7 @@
   var SEEK_SMALL = 10;          // ←→ キーと「10秒」ボタンで動かす秒数
   var SEEK_LARGE = 60;          // Shift+←→ と「1分」ボタンで動かす秒数
   var ASK_OUTPUTS = '__ask';    // 出力の選択肢「ほかの出力デバイスを表示…」
-  var APP_VERSION = '0.9.0'; // index.html の版と違えば、古いファイルが読み込まれている
+  var APP_VERSION = '0.9.1'; // index.html の版と違えば、古いファイルが読み込まれている
   var AUDIO_EXT = /\.(wav|wave|mp3|m4a|aac|flac|ogg|oga|opus|aif|aiff|mp4|m4v|mov)$/i;
   var VIDEO_EXT = /\.(mp4|m4v|mov)$/i; // 動画ファイルは音声だけ取り出して鳴らす
 
@@ -1826,6 +1826,12 @@
         else if (e.key === 'Escape') closeDelete();
         return;
       }
+      // アップデートの案内を開いている間は、Esc で閉じるだけ（Space で GO しない）
+      if (updateOpen()) {
+        if (e.key === 'Escape') { e.preventDefault(); closeUpdateDialog(); }
+        else if (e.code === 'Space') e.preventDefault();
+        return;
+      }
       if (e.metaKey || e.ctrlKey || e.altKey) return;
       var tag = e.target && e.target.tagName;
       // 文字の入力欄では打鍵を優先。音量バー（range）にフォーカスがあっても、キー操作はGOなどに使う
@@ -3556,6 +3562,81 @@
     });
   }
 
+  // ---------- 新しい版のお知らせ（アプリ版のみ） ----------
+  // 起動して少ししたら、ネットにつながっていれば GitHub の最新リリースを調べる。
+  // 本番の邪魔にならないよう、勝手にダイアログは出さず、上に「新しい版があります」を出すだけ。
+
+  var updateInfo = null;
+
+  function updateAvailable() { return !!(window.ponNative && window.ponNative.update); }
+
+  // '0.10.0' と '0.9.3' のように、数字ごとに比べる。a が新しければ正
+  function compareVersion(a, b) {
+    var pa = String(a).split(/[.\-+]/), pb = String(b).split(/[.\-+]/);
+    for (var i = 0; i < 3; i++) {
+      var x = parseInt(pa[i], 10) || 0, y = parseInt(pb[i], 10) || 0;
+      if (x !== y) return x > y ? 1 : -1;
+    }
+    return 0;
+  }
+
+  function checkForUpdate(manual) {
+    if (!updateAvailable()) { if (manual) toast('アップデートの確認はアプリ版で使えます'); return; }
+    if (!manual && navigator.onLine === false) return;
+    if (manual) toast('最新の版を確認しています…');
+    window.ponNative.update.check().then(function (r) {
+      if (!r || !r.ok) {
+        if (manual) toast(r && r.status === 'offline' ? 'ネットにつながっていないため確認できませんでした' : '確認できませんでした。しばらくしてからもう一度お試しください');
+        return;
+      }
+      var newer = compareVersion(r.version, APP_VERSION) > 0;
+      updateInfo = newer ? r : null;
+      renderUpdateBtn();
+      if (!newer) { if (manual) toast('最新の版です（Ver. ' + APP_VERSION + '）'); return; }
+      if (manual) { openUpdateDialog(); return; }
+      if (loadSetting('updateSkip', '') === r.version) return; // 「この版は知らせない」
+      toast('新しい版 Ver. ' + r.version + ' があります（左上のボタンから）');
+    }, function () {
+      if (manual) toast('確認できませんでした');
+    });
+  }
+
+  function renderUpdateBtn() {
+    var b = $('updateBtn');
+    if (!b) return;
+    var show = !!updateInfo && loadSetting('updateSkip', '') !== updateInfo.version;
+    b.hidden = !show;
+    if (show) b.textContent = '新しい版 Ver. ' + updateInfo.version;
+  }
+
+  function updateOpen() { return !$('updateBackdrop').hidden; }
+
+  function openUpdateDialog() {
+    if (!updateInfo) return;
+    $('updateVer').textContent = 'Ver. ' + APP_VERSION + ' → Ver. ' + updateInfo.version + (updateInfo.publishedAt ? '（' + updateInfo.publishedAt.slice(0, 10).replace(/-/g, '/') + '）' : '');
+    var notes = (updateInfo.notes || '').replace(/\r/g, '').replace(/^#+\s*/gm, '').replace(/\*\*/g, '').trim();
+    $('updateNotes').textContent = notes;
+    $('updateNotes').hidden = !notes;
+    $('updateBackdrop').hidden = false;
+  }
+
+  function closeUpdateDialog() { $('updateBackdrop').hidden = true; }
+
+  function bindUpdate() {
+    $('updateBtn').addEventListener('click', function (e) { e.currentTarget.blur(); openUpdateDialog(); });
+    $('updateClose').addEventListener('click', closeUpdateDialog);
+    $('updateBackdrop').addEventListener('click', function (e) { if (e.target === $('updateBackdrop')) closeUpdateDialog(); });
+    $('updateOpen').addEventListener('click', function () { window.ponNative.update.open('page'); closeUpdateDialog(); });
+    $('updateSkip').addEventListener('click', function () {
+      if (updateInfo) saveSetting('updateSkip', updateInfo.version);
+      closeUpdateDialog(); renderUpdateBtn();
+      toast('この版のお知らせを止めました（メニューの「アップデートを確認」でいつでも見られます）');
+    });
+    if (!updateAvailable()) return;
+    window.ponNative.update.onRequest(function () { checkForUpdate(true); });
+    setTimeout(function () { checkForUpdate(false); }, 4000);
+  }
+
   // ---------- 起動 ----------
 
   function init() {
@@ -3595,6 +3676,7 @@
   bind();
   bindSe();
   bindBgm();
+  bindUpdate();
   render();
   init();
   refreshOutputs(true);

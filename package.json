@@ -1,7 +1,7 @@
 {
   "name": "pon-dashi",
   "productName": "ポン出し",
-  "version": "0.9.0",
+  "version": "0.9.1",
   "description": "音響現場用のポン出しソフト",
   "author": "HK SOUND",
   "private": true,

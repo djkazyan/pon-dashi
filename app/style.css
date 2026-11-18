@@ -1097,3 +1097,9 @@ button { cursor: pointer; }
 .c-title { display: flex; align-items: center; min-width: 0; }
 .c-title .title-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .rename-input { width: 100%; box-sizing: border-box; padding: 4px 8px; border-radius: 6px; border: 1px solid var(--accent-hi); background: var(--bg); color: var(--text); font: inherit; }
+
+/* 新しい版のお知らせ（Ver. 0.9.1） */
+.update-btn { border-color: var(--accent-hi); color: var(--accent-hi); font-weight: 700; }
+.update-ver { margin: 4px 0 0; font-size: 15px; font-weight: 700; }
+.update-notes { margin: 0; max-height: 220px; overflow: auto; white-space: pre-wrap; font: inherit; font-size: 13px; line-height: 1.6;
+  background: var(--raised); border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px; }

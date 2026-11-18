@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ポン出し ダウンロード</title>
+<meta name="description" content="音響現場で、渡された曲を間違いなく・正しい順で出すためのポン出しソフト（Mac／Windows）">
+<style>
+  :root {
+    --bg: #101216; --panel: #191c22; --raised: #22262e; --line: #2e333d;
+    --text: #eceef2; --muted: #a3abb8; --accent: #2a6ae8; --accent-hi: #5b9bff; --play: #22c3d8; --caution: #ffb224;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); line-height: 1.75;
+    font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic UI", "Meiryo", sans-serif; }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 40px 20px 64px; }
+  header { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; }
+  h1 { margin: 0; font-size: 34px; letter-spacing: .04em; }
+  .tag { color: var(--muted); font-size: 14px; }
+  .lead { margin: 10px 0 28px; color: var(--muted); }
+  h2 { font-size: 19px; margin: 40px 0 12px; padding-left: 10px; border-left: 4px solid var(--accent); }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 22px; }
+  .latest-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+  .ver { font-size: 26px; font-weight: 800; color: var(--accent-hi); }
+  .date { color: var(--muted); font-size: 14px; }
+  .notes { font: inherit; margin: 12px 0 0; padding: 12px 14px; background: var(--raised); border-radius: 8px; white-space: pre-wrap; font-size: 14px; max-height: 260px; overflow: auto; }
+  .notes:empty { display: none; }
+  .dl { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 20px; }
+  .dl a { display: block; text-decoration: none; color: #fff; background: var(--accent); border-radius: 10px; padding: 16px 18px; transition: filter .15s; }
+  .dl a:hover { filter: brightness(1.12); }
+  .dl a.off { background: var(--raised); color: var(--muted); pointer-events: none; }
+  .dl .os { font-size: 20px; font-weight: 800; display: block; }
+  .dl .sub { font-size: 13px; opacity: .85; }
+  .alt { margin: 16px 0 0; font-size: 14px; color: var(--muted); }
+  a { color: var(--accent-hi); }
+  .status { color: var(--muted); font-size: 14px; }
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .cols .card h3 { margin: 0 0 8px; font-size: 16px; }
+  ol, ul { margin: 0; padding-left: 1.4em; }
+  li { margin: 2px 0; }
+  code { background: var(--raised); border-radius: 4px; padding: 1px 6px; font-size: 13px; word-break: break-all; }
+  .note { border-left: 4px solid var(--caution); background: rgba(255, 178, 36, .07); padding: 10px 14px; border-radius: 0 8px 8px 0; font-size: 14px; margin-top: 14px; }
+  .features { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; }
+  .features div { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; font-size: 14px; }
+  .features b { display: block; color: var(--play); margin-bottom: 2px; }
+  footer { margin-top: 48px; color: var(--muted); font-size: 13px; }
+  @media (max-width: 640px) { .dl, .cols { grid-template-columns: 1fr; } h1 { font-size: 28px; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>ポン出し</h1>
+    <span class="tag">PonDashi — Mac / Windows</span>
+  </header>
+  <p class="lead">音響現場で、渡された曲を「間違いなく・正しい順で」出すためのポン出しソフトです。曲は1曲ずつ止まり、次の曲が待機します。ネット接続なしで動きます。</p>
+
+  <section class="card" id="latest">
+    <div class="latest-head">
+      <span class="ver" id="ver">最新の版</span>
+      <span class="date" id="date"></span>
+    </div>
+    <p class="status" id="status">最新の版を読み込んでいます…</p>
+    <pre class="notes" id="notes"></pre>
+    <div class="dl">
+      <a id="dlMac" class="off" href="https://github.com/djkazyan/pon-dashi/releases/latest"><span class="os">Mac 版</span><span class="sub" id="dlMacSub">M1 以降の Mac（.dmg）</span></a>
+      <a id="dlWin" class="off" href="https://github.com/djkazyan/pon-dashi/releases/latest"><span class="os">Windows 版</span><span class="sub" id="dlWinSub">Windows 10 / 11・64ビット（.zip）</span></a>
+    </div>
+    <p class="alt">
+      うまくダウンロードできない時は <a href="https://drive.google.com/drive/folders/14LyanrjXKkW3p3oJzZ83SJCAaulrxA8r" target="_blank" rel="noopener">Google ドライブ</a> からも取れます。
+      ／ <a href="https://github.com/djkazyan/pon-dashi/releases" target="_blank" rel="noopener">これまでの版</a>
+    </p>
+  </section>
+
+  <h2>新しい版のお知らせ</h2>
+  <p>アプリを起動した時にネットにつながっていれば、新しい版があるかを自動で調べます。あれば画面左上に「新しい版 Ver. ○○」が出るので、押してこのページを開き、ダウンロードして入れ替えてください。メニューの「アップデートを確認…」でいつでも確認できます（Ver. 0.9.1 から）。</p>
+  <p class="status">本番中に勝手に画面が出ることはありません。保存してあるイベント・SE・BGM は、入れ替えても消えません。</p>
+
+  <h2>インストールと入れ替え</h2>
+  <div class="cols">
+    <div class="card">
+      <h3>Mac</h3>
+      <ol>
+        <li>ダウンロードした <code>PonDashi-（版）-arm64.dmg</code> を開く</li>
+        <li>PonDashi を「アプリケーション」フォルダへドラッグ（新しい版は上書き）</li>
+        <li>初回だけ、アプリを右クリック →「開く」→「開く」</li>
+      </ol>
+      <div class="note">開けない時は「システム設定」→「プライバシーとセキュリティ」の下の「このまま開く」。<br>「壊れているため開けません」と出る時は、ターミナルで<br><code>xattr -cr /Applications/PonDashi.app</code></div>
+    </div>
+    <div class="card">
+      <h3>Windows</h3>
+      <ol>
+        <li>ダウンロードした <code>PonDashi-（版）-win-x64.zip</code> を右クリック →「すべて展開」</li>
+        <li>できた PonDashi フォルダを好きな場所へ（新しい版は古いフォルダと入れ替え）</li>
+        <li>中の <code>PonDashi.exe</code> を開く</li>
+      </ol>
+      <div class="note">「Windows によって PC が保護されました」と出たら「詳細情報」→「実行」。</div>
+    </div>
+  </div>
+  <p class="status">Apple・Microsoft の正式な署名がない自作アプリのため、初回に確認が出ます。知り合いの方への配布用です。</p>
+
+  <h2>できること</h2>
+  <div class="features">
+    <div><b>1曲ずつ確実に</b>GO はスタンバイ中の1曲だけ。2回押し・連打ガード・残り時間の警告・本番ロック</div>
+    <div><b>グループとキュー</b>出演者ごとのタブ、きっかけ（音先・板付き・曲フリ・MC）と終了後（停止・続けて・ループ）</div>
+    <div><b>再生範囲</b>頭・末尾の無音を詰める、途中から再生、MCオケのループ</div>
+    <div><b>SE・BGM</b>SEパッド8個、客入れ・転換・客出しのBGM（一時停止つき）</div>
+    <div><b>ボーカルの被せ調整</b>AIでボーカルを分けて、被せを少し下げる</div>
+    <div><b>映像出力</b>MP4 の映像を外部モニターへ。何もない時は黒またはロゴ</div>
+  </div>
+
+  <footer>
+    わからないこと・不具合は、渡してくれた人に伝えてください。<br>
+    HK SOUND ／ <a href="https://github.com/djkazyan/pon-dashi" target="_blank" rel="noopener">GitHub</a>
+  </footer>
+</div>
+<script>
+(function () {
+  var $ = function (id) { return document.getElementById(id); };
+  function size(n) { return n ? '約' + Math.round(n / 1048576) + 'MB' : ''; }
+  function setLink(el, sub, asset, label) {
+    if (!asset) return;
+    el.href = asset.browser_download_url;
+    el.classList.remove('off');
+    $(sub).textContent = label + (asset.size ? '・' + size(asset.size) : '');
+  }
+  fetch('https://api.github.com/repos/djkazyan/pon-dashi/releases/latest', { headers: { Accept: 'application/vnd.github+json' } })
+    .then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); })
+    .then(function (rel) {
+      var v = String(rel.tag_name || rel.name || '').replace(/^[^0-9]*/, '');
+      $('ver').textContent = 'Ver. ' + v;
+      if (rel.published_at) $('date').textContent = rel.published_at.slice(0, 10).replace(/-/g, '/') + ' 公開';
+      $('notes').textContent = String(rel.body || '').replace(/\r/g, '').replace(/^#+\s*/gm, '').replace(/\*\*/g, '').trim();
+      var assets = rel.assets || [];
+      var mac = assets.filter(function (a) { return /\.dmg$/i.test(a.name); })[0];
+      var win = assets.filter(function (a) { return /win.*\.zip$/i.test(a.name) || /\.exe$/i.test(a.name); })[0];
+      setLink($('dlMac'), 'dlMacSub', mac, 'M1 以降の Mac（.dmg）');
+      setLink($('dlWin'), 'dlWinSub', win, 'Windows 10 / 11・64ビット（.zip）');
+      $('status').textContent = (mac && win) ? '' : 'まだ用意できていないファイルがあります。少し待つか、Google ドライブをご覧ください。';
+    })
+    .catch(function () {
+      $('status').innerHTML = '最新の版を読み込めませんでした。<a href="https://github.com/djkazyan/pon-dashi/releases/latest">GitHub のリリース</a>か Google ドライブからダウンロードしてください。';
+      $('dlMac').classList.remove('off'); $('dlWin').classList.remove('off');
+    });
+})();
+</script>
+</body>
+</html>

@@ -6,7 +6,7 @@
  */
 'use strict';
 
-const { app, BrowserWindow, Menu, dialog, powerSaveBlocker, session, ipcMain, screen } = require('electron');
+const { app, BrowserWindow, Menu, dialog, powerSaveBlocker, session, ipcMain, screen, net, shell } = require('electron');
 const { Worker } = require('worker_threads');
 const path = require('path');
 
@@ -183,6 +183,50 @@ ipcMain.handle('video-open', (event, target) => openVideoWindow(target));
 ipcMain.handle('video-close', () => { closeVideoWindow(); return true; });
 
 // ---------- 画面（ディスプレイ）まわり ----------
+// ---- 新しい版のお知らせ ----
+// GitHub の最新リリースを調べるだけ。ダウンロードと入れ替えは各自で（署名のない自作アプリのため自動更新はしない）
+const RELEASE_API = 'https://api.github.com/repos/djkazyan/pon-dashi/releases/latest';
+const DOWNLOAD_PAGE = 'https://djkazyan.github.io/pon-dashi/';
+
+async function checkLatestRelease() {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 8000);
+  try {
+    const res = await net.fetch(RELEASE_API, {
+      headers: { 'Accept': 'application/vnd.github+json', 'User-Agent': 'PonDashi/' + app.getVersion() },
+      signal: ctrl.signal
+    });
+    if (!res.ok) return { ok: false, status: res.status };
+    const r = await res.json();
+    const version = String(r.tag_name || r.name || '').replace(/^[^0-9]*/, '');
+    if (!/^\d+\.\d+\.\d+/.test(version)) return { ok: false, status: 'no-version' };
+    return {
+      ok: true,
+      version,
+      title: String(r.name || ''),
+      notes: String(r.body || '').slice(0, 4000),
+      publishedAt: r.published_at || '',
+      url: String(r.html_url || '')
+    };
+  } catch (err) {
+    return { ok: false, status: 'offline' };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+ipcMain.handle('update-check', () => checkLatestRelease());
+ipcMain.handle('update-open', (event, which) => {
+  // 開いてよいのは決まった配布先だけ
+  const url = which === 'releases' ? 'https://github.com/djkazyan/pon-dashi/releases' : DOWNLOAD_PAGE;
+  shell.openExternal(url);
+  return true;
+});
+
+function askUpdateCheck() {
+  if (mainWindow) mainWindow.webContents.send('update-check-request');
+}
+
 // macOS は、ウィンドウの大部分がある画面で最大化・フルスクリーンにする。
 // 2つの画面にまたがっていると、思っていない方の画面で大きくなるので、
 // 「いまウィンドウの真ん中がある画面」に収めてから大きくする。
@@ -248,6 +292,7 @@ function buildMenu() {
       label: 'ポン出し',
       submenu: [
         { role: 'about', label: 'ポン出しについて' },
+        { label: 'アップデートを確認…', click: askUpdateCheck },
         { type: 'separator' },
         { role: 'hide', label: 'ポン出しを隠す' },
         { role: 'hideOthers', label: 'ほかを隠す' },
@@ -271,6 +316,13 @@ function buildMenu() {
       submenu: [
         { role: 'minimize', label: 'しまう' },
         ...(isMac ? [] : [{ role: 'quit', label: '終了' }])
+      ]
+    },
+    {
+      label: 'ヘルプ',
+      submenu: [
+        { label: 'アップデートを確認…', click: askUpdateCheck },
+        { label: '配布ページを開く', click: () => shell.openExternal(DOWNLOAD_PAGE) }
       ]
     }
   ];
