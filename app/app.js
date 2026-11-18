@@ -15,7 +15,7 @@
   var SEEK_SMALL = 10;          // ←→ キーと「10秒」ボタンで動かす秒数
   var SEEK_LARGE = 60;          // Shift+←→ と「1分」ボタンで動かす秒数
   var ASK_OUTPUTS = '__ask';    // 出力の選択肢「ほかの出力デバイスを表示…」
-  var APP_VERSION = '0.10.1'; // index.html の版と違えば、古いファイルが読み込まれている
+  var APP_VERSION = '0.10.2'; // index.html の版と違えば、古いファイルが読み込まれている
   var AUDIO_EXT = /\.(wav|wave|mp3|m4a|aac|flac|ogg|oga|opus|aif|aiff|mp4|m4v|mov)$/i;
   var LOUD_TARGET = -11;       // オートゲインの目標（LUFS）
   var GAIN_ADJ_MAX = 12;       // 曲ごとの微調整の幅（±dB）
@@ -384,6 +384,7 @@
       cue: normalizeCue(data.cue), // きっかけメモ { type, text }
       vocal: data.vocal && data.vocalFile ? { level: clampLevel(data.vocal.level) } : null, // ボーカル調整（分離済みの時だけ）
       vocalFile: data.vocal ? data.vocalFile || null : null,
+      vocalInfo: data.vocal && data.vocalInfo ? String(data.vocalInfo).slice(0, 80) : '',
       // オートゲイン：測ったラウドネスとピーク、曲ごとの微調整（dB）
       loud: data.loud && typeof data.loud === 'object' ? { lufs: data.loud.lufs == null ? null : Number(data.loud.lufs), peakDb: data.loud.peakDb == null ? null : Number(data.loud.peakDb) } : null,
       gainAdj: isFinite(Number(data.gainAdj)) ? Math.max(-GAIN_ADJ_MAX, Math.min(GAIN_ADJ_MAX, Number(data.gainAdj))) : 0,
@@ -1828,6 +1829,15 @@
     });
     $('rangeFoldHead').addEventListener('click', function () { toggleFold('range'); });
     $('gainFoldHead').addEventListener('click', function () { toggleFold('gain'); });
+    $('vocalGpu').addEventListener('click', function (e) {
+      e.currentTarget.blur();
+      if (vocalJob) return;
+      vocalUseGpu = !vocalUseGpu;
+      saveSetting('vocalGpu', vocalUseGpu ? '1' : '0');
+      render();
+      toast(vocalUseGpu ? 'ボーカルの分離に GPU を使います（使えなければ CPU）' : 'ボーカルの分離は CPU だけで行います');
+    });
+    vocalUseGpu = loadSetting('vocalGpu', '1') !== '0';
     $('trimHeadAll').addEventListener('click', function (e) { e.currentTarget.blur(); trimHeadAll(); });
     $('gainDown').addEventListener('click', function (e) { e.currentTarget.blur(); var t = selectedTrack(); if (t) setGainAdj(t, (t.gainAdj || 0) - 0.5); });
     $('gainUp').addEventListener('click', function (e) { e.currentTarget.blur(); var t = selectedTrack(); if (t) setGainAdj(t, (t.gainAdj || 0) + 0.5); });
@@ -2214,6 +2224,7 @@
       if (t.loud) saved[t.id].loud = { lufs: t.loud.lufs, peakDb: t.loud.peakDb };
       if (t.gainAdj) saved[t.id].gainAdj = t.gainAdj;
       if (t.autoCue === 'pending') saved[t.id].autoCue = 'pending';
+      if (t.vocal && t.vocalInfo) saved[t.id].vocalInfo = t.vocalInfo;
     });
     return {
       id: show.id,
@@ -2341,7 +2352,8 @@
           outPoint: x.data.outPoint,
           loud: x.data.loud,
           gainAdj: x.data.gainAdj,
-          autoCue: x.data.autoCue
+          autoCue: x.data.autoCue,
+          vocalInfo: x.data.vocalInfo
         });
       });
       syncOrder();
@@ -2625,7 +2637,7 @@
         job.done = done;
         job.total = total;
         renderVocalProgress();
-      });
+      }, vocalGpuSupported() && vocalUseGpu ? 'gpu' : 'cpu');
     }).then(function (res) {
       var blob = audio.encodeWav16(res.left, res.right, 44100);
       var saving = storeOk ? store.putFile(vocalKey(id), blob) : Promise.resolve();
@@ -2634,7 +2646,8 @@
         if (!tt) { if (storeOk) store.deleteFiles([vocalKey(id)]).catch(function () {}); return; }
         tt.vocalFile = blob;
         tt.vocal = { level: 1 };
-        toast('「' + tt.name + '」のボーカルを分けました。下のバーで量を調整できます');
+        tt.vocalInfo = vocalStatText(res.stats);
+        toast('「' + tt.name + '」のボーカルを分けました' + (tt.vocalInfo ? '（' + tt.vocalInfo + '）' : '') + (res.stats && res.stats.fellBack ? '。' + res.stats.fellBack : ''));
         if (buffers.has(id)) return loadVocalBuffer(tt);
       });
     }).catch(function (err) {
@@ -2646,6 +2659,20 @@
       afterChange();
       runVocalQueue();
     });
+  }
+
+  // GPU で分ける（Mac：CoreML、Windows：DirectML）。使えない・失敗した時は自動で CPU
+  var vocalUseGpu = true;
+
+  function vocalGpuSupported() {
+    var pf = window.ponNative && window.ponNative.platform;
+    return pf === 'darwin' || pf === 'win32';
+  }
+
+  function vocalStatText(st) {
+    if (!st || !st.ms) return '';
+    var sec = Math.round(st.ms / 1000);
+    return st.device + 'で ' + (sec >= 60 ? Math.floor(sec / 60) + '分' + pad2(sec % 60) + '秒' : sec + '秒') + '（曲 ' + fmtShort(st.seconds || 0) + '）';
   }
 
   function cancelVocal() {
@@ -2689,6 +2716,9 @@
     var hasVocal = !!t.vocal;
     $('vocalSeparate').hidden = !avail || hasVocal || running || queued;
     $('vocalSeparateGroup').hidden = !avail || running || queued;
+    $('vocalGpu').hidden = !avail || !vocalGpuSupported() || hasVocal;
+    $('vocalGpu').setAttribute('aria-pressed', String(vocalUseGpu));
+    $('vocalGpu').disabled = !!vocalJob;
     $('vocalCancel').hidden = !(vocalJob || vocalQueue.length) || !(running || queued);
     $('vocalProgress').hidden = !running;
     $('vocalSliderRow').hidden = !hasVocal;
@@ -2712,7 +2742,7 @@
         note.textContent = '30%より下げると、音の劣化に気づきやすくなります（大きな音量では特に）';
         note.className = 'vocal-note is-warn';
       } else {
-        note.textContent = '分離済み。被せの量を下げられます';
+        note.textContent = '分離済み。被せの量を下げられます' + (t.vocalInfo ? '（' + t.vocalInfo + '）' : '');
       }
       $('vocalReset').disabled = t.vocal.level >= 0.995;
       $('vocalRemove').disabled = locked || !!(current && current.trackId === t.id);

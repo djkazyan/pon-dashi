@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ポン出し</title>
-<link rel="stylesheet" href="style.css?v=0.10.1">
+<link rel="stylesheet" href="style.css?v=0.10.2">
 </head>
 <body>
 <div class="app" id="app">
@@ -12,7 +12,7 @@
   <header class="topbar">
     <div class="brand">
       <span class="brand-name">ポン出し</span>
-      <span class="brand-ver" id="appVersion" data-version="0.10.1">Ver. 0.10.1</span>
+      <span class="brand-ver" id="appVersion" data-version="0.10.2">Ver. 0.10.2</span>
       <button type="button" class="btn btn-small update-btn" id="updateBtn" hidden>新しい版があります</button>
       <input type="text" class="show-name" id="showName" aria-label="イベント名" maxlength="60" spellcheck="false">
       <span class="save-status" id="saveStatus">保存済み</span>
@@ -166,6 +166,7 @@
           <button type="button" class="btn btn-small" id="vocalSeparateGroup">このグループをまとめて</button>
           <button type="button" class="btn btn-small" id="vocalCancel" hidden>中止</button>
         </div>
+        <button type="button" class="toggle" id="vocalGpu" aria-pressed="true" hidden>GPUで分ける（使えなければCPU）</button>
         <div class="detail-row" id="vocalAfter" hidden>
           <button type="button" class="btn btn-small" id="vocalReset">100%に戻す</button>
           <button type="button" class="btn btn-small" id="vocalRemove">分けたボーカルを消す</button>
@@ -414,10 +415,10 @@
   </div>
 </div>
 
-<script src="cue-engine.js?v=0.10.1"></script>
-<script src="store.js?v=0.10.1"></script>
-<script src="audio-engine.js?v=0.10.1"></script>
-<script src="backup.js?v=0.10.1"></script>
-<script src="app.js?v=0.10.1"></script>
+<script src="cue-engine.js?v=0.10.2"></script>
+<script src="store.js?v=0.10.2"></script>
+<script src="audio-engine.js?v=0.10.2"></script>
+<script src="backup.js?v=0.10.2"></script>
+<script src="app.js?v=0.10.2"></script>
 </body>
 </html>

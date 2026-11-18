@@ -6,8 +6,7 @@
  */
 'use strict';
 
-const { app, BrowserWindow, Menu, dialog, powerSaveBlocker, session, ipcMain, screen, net, shell } = require('electron');
-const { Worker } = require('worker_threads');
+const { app, BrowserWindow, Menu, dialog, powerSaveBlocker, session, ipcMain, screen, net, shell, utilityProcess } = require('electron');
 const path = require('path');
 
 let mainWindow = null;
@@ -71,13 +70,17 @@ function modelPath() {
     : path.join(__dirname, 'models', MODEL_FILE);
 }
 
+let gpuCrashed = false; // GPU で分離中に処理ごと落ちたら、この起動中は CPU だけにする
+
 function getSepWorker() {
   clearTimeout(sepIdleTimer);
   if (sepWorker) return sepWorker;
   // 組み立てたアプリでは、分離の部品は app.asar の外（app.asar.unpacked）に置いてある
   const workerFile = path.join(__dirname, 'sep-worker.js').replace('app.asar' + path.sep, 'app.asar.unpacked' + path.sep);
-  sepWorker = new Worker(workerFile, { workerData: { modelPath: modelPath() } });
-  sepWorker.on('message', (msg) => {
+  // 別のプロセスで動かす（GPU の部品が落ちても、アプリ本体と音は止まらない）
+  const child = utilityProcess.fork(workerFile, [modelPath()], { serviceName: 'PonDashi ボーカル分離' });
+  sepWorker = child;
+  child.on('message', (msg) => {
     const job = sepJobs.get(msg.id);
     if (!job) return;
     if (msg.type === 'progress') {
@@ -85,25 +88,39 @@ function getSepWorker() {
       return;
     }
     sepJobs.delete(msg.id);
-    if (msg.type === 'done') job.resolve({ left: msg.left, right: msg.right });
+    if (msg.type === 'done') job.resolve({ left: msg.left, right: msg.right, stats: msg.stats });
     else job.reject(new Error(msg.message));
     if (!sepJobs.size) scheduleSepRelease();
   });
-  sepWorker.on('error', (err) => {
-    sepJobs.forEach((job) => job.reject(err));
+  child.on('exit', (code) => {
+    if (sepWorker === child) sepWorker = null;
+    if (!sepJobs.size) return;
+    const jobs = Array.from(sepJobs.entries());
     sepJobs.clear();
-    sepWorker = null;
+    jobs.forEach(([id, job]) => {
+      if (job.device === 'gpu') {
+        // GPU の部品ごと落ちた → この起動中は CPU だけにして、最初から CPU でやり直す
+        gpuCrashed = true;
+        job.device = 'cpu';
+        job.crashed = true;
+        sepJobs.set(id, job);
+        if (!job.sender.isDestroyed()) job.sender.send('vocal-progress', { id, done: 0, total: 0 });
+        getSepWorker().postMessage({ type: 'separate', id, left: job.left, right: job.right, device: 'cpu' });
+      } else {
+        job.reject(new Error('分離の処理が止まりました（' + code + '）'));
+      }
+    });
   });
-  sepWorker.on('exit', () => { sepWorker = null; });
-  return sepWorker;
+  return child;
 }
 
 function scheduleSepRelease() {
   clearTimeout(sepIdleTimer);
   sepIdleTimer = setTimeout(() => {
     if (sepWorker && !sepJobs.size) {
-      sepWorker.terminate();
+      const w = sepWorker;
       sepWorker = null;
+      w.kill();
     }
   }, 3 * 60 * 1000);
 }
@@ -112,9 +129,17 @@ ipcMain.handle('vocal-separate', (event, job) => {
   if (!require('fs').existsSync(modelPath())) {
     return Promise.reject(new Error('分離用のモデルが見つかりません'));
   }
+  const device = job.device === 'gpu' && !gpuCrashed ? 'gpu' : 'cpu';
+  const entry = { sender: event.sender, device, left: job.left, right: job.right };
   return new Promise((resolve, reject) => {
-    sepJobs.set(job.id, { resolve, reject, sender: event.sender });
-    getSepWorker().postMessage({ type: 'separate', id: job.id, left: job.left, right: job.right });
+    entry.resolve = resolve;
+    entry.reject = reject;
+    sepJobs.set(job.id, entry);
+    getSepWorker().postMessage({ type: 'separate', id: job.id, left: job.left, right: job.right, device });
+  }).then((r) => {
+    if (r.stats && entry.crashed) r.stats.fellBack = 'GPU での分離が途中で止まったため、CPU でやり直しました（次からも CPU）';
+    else if (job.device === 'gpu' && device === 'cpu' && r.stats && !r.stats.fellBack) r.stats.fellBack = '前に GPU で止まったため、CPU で分けました';
+    return r;
   });
 });
 

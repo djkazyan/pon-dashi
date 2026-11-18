@@ -10,10 +10,11 @@ ipcRenderer.on('vocal-progress', (event, msg) => {
 
 contextBridge.exposeInMainWorld('ponNative', {
   vocalSeparation: true,
-  // left/right：44.1kHz の Float32Array。戻り値：{ left, right }（ボーカルだけ）
-  separateVocals(id, left, right, onProgress) {
+  platform: process.platform,
+  // left/right：44.1kHz の Float32Array。device：'gpu' か 'cpu'。戻り値：{ left, right（ボーカルだけ）, stats }
+  separateVocals(id, left, right, onProgress, device) {
     listeners[id] = onProgress;
-    return ipcRenderer.invoke('vocal-separate', { id, left, right }).finally(() => { delete listeners[id]; });
+    return ipcRenderer.invoke('vocal-separate', { id, left, right, device: device || 'cpu' }).finally(() => { delete listeners[id]; });
   },
   cancelVocals(id) {
     ipcRenderer.send('vocal-cancel', id);
