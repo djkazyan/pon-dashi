@@ -5,16 +5,18 @@ const { contextBridge, ipcRenderer } = require('electron');
 const listeners = {};
 ipcRenderer.on('vocal-progress', (event, msg) => {
   const fn = listeners[msg.id];
-  if (fn) fn(msg.done, msg.total);
+  if (fn) fn(msg.done, msg.total, msg.phase || '');
 });
 
 contextBridge.exposeInMainWorld('ponNative', {
   vocalSeparation: true,
   platform: process.platform,
   // left/right：44.1kHz の Float32Array。device：'gpu' か 'cpu'。戻り値：{ left, right（ボーカルだけ）, stats }
-  separateVocals(id, left, right, onProgress, device) {
+  // opts：{ device: 'gpu' | 'cpu', gpuDevice: 使う GPU の番号（未定なら null） }
+  separateVocals(id, left, right, onProgress, opts) {
     listeners[id] = onProgress;
-    return ipcRenderer.invoke('vocal-separate', { id, left, right, device: device || 'cpu' }).finally(() => { delete listeners[id]; });
+    const o = typeof opts === 'string' ? { device: opts } : (opts || {});
+    return ipcRenderer.invoke('vocal-separate', { id, left, right, device: o.device || 'cpu', gpuDevice: o.gpuDevice == null ? null : o.gpuDevice }).finally(() => { delete listeners[id]; });
   },
   cancelVocals(id) {
     ipcRenderer.send('vocal-cancel', id);

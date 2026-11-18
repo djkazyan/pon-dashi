@@ -135,7 +135,7 @@ ipcMain.handle('vocal-separate', (event, job) => {
     entry.resolve = resolve;
     entry.reject = reject;
     sepJobs.set(job.id, entry);
-    getSepWorker().postMessage({ type: 'separate', id: job.id, left: job.left, right: job.right, device });
+    getSepWorker().postMessage({ type: 'separate', id: job.id, left: job.left, right: job.right, device, gpuDevice: job.gpuDevice });
   }).then((r) => {
     if (r.stats && entry.crashed) r.stats.fellBack = 'GPU での分離が途中で止まったため、CPU でやり直しました（次からも CPU）';
     else if (job.device === 'gpu' && device === 'cpu' && r.stats && !r.stats.fellBack) r.stats.fellBack = '前に GPU で止まったため、CPU で分けました';

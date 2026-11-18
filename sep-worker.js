@@ -22,23 +22,18 @@ const sessions = {};           // 'cpu' / 'gpu' -> InferenceSession
 const gpuBroken = { flag: false, reason: '' }; // 一度 GPU で失敗したら、この起動中は CPU だけにする
 let cancelled = {};
 
-// GPU で動かす仕組み：Mac は CoreML（GPU・Neural Engine）、Windows は DirectML（DirectX 12 のグラボ）
-function gpuProvider() {
+// GPU で動かす仕組み：Windows は DirectML（DirectX 12 のグラボ）。
+// Mac の CoreML は、このモデルだと準備（変換）に5分ほどかかり実用にならないため使わない（Ver. 0.10.3）
+function gpuProvider(deviceId) {
   // テスト用：GPU が使えない時の動き（CPU に戻る）を確かめる
   if (process.env.PON_FAKE_GPU) return { label: 'GPU（テスト）', providers: [{ name: process.env.PON_FAKE_GPU }, 'cpu'] };
-  if (process.platform === 'darwin') {
-    // 0x010 = ML Program 形式（対応する計算が多い）、0x008 = 入力の形は固定
-    return { label: 'GPU（CoreML）', providers: [{ name: 'coreml', coreMlFlags: 0x010 | 0x008 }, 'cpu'] };
-  }
   if (process.platform === 'win32') {
-    return { label: 'GPU（DirectML）', providers: [{ name: 'dml' }, 'cpu'] };
+    return { label: 'GPU（DirectML）', providers: [{ name: 'dml', deviceId: deviceId || 0 }, 'cpu'] };
   }
   return null;
 }
 
-async function getSession(kind) {
-  if (sessions[kind]) return sessions[kind];
-  ort = ort || require('onnxruntime-node');
+function sessionOptions(kind, deviceId) {
   const threads = Math.max(1, Math.min(8, os.cpus().length - 2)); // 2コアは音と画面のために空けておく
   const opts = {
     graphOptimizationLevel: 'disabled', // 最適化をかけるとメモリを使いすぎる（8GBのMacでも落ちる）
@@ -46,15 +41,49 @@ async function getSession(kind) {
     intraOpNumThreads: threads
   };
   if (kind === 'gpu') {
-    const g = gpuProvider();
-    opts.executionProviders = g.providers;
+    opts.executionProviders = gpuProvider(deviceId).providers;
     opts.enableMemPattern = false;     // DirectML の決まり
     opts.executionMode = 'sequential';
   } else {
     opts.executionProviders = ['cpu'];
   }
-  sessions[kind] = await ort.InferenceSession.create(workerData.modelPath, opts);
+  return opts;
+}
+
+let gpuDeviceInUse = -1;
+
+async function getSession(kind, deviceId) {
+  if (kind === 'gpu' && sessions.gpu && gpuDeviceInUse !== deviceId) await dropSession('gpu');
+  if (sessions[kind]) return sessions[kind];
+  ort = ort || require('onnxruntime-node');
+  sessions[kind] = await ort.InferenceSession.create(workerData.modelPath, sessionOptions(kind, deviceId));
+  if (kind === 'gpu') gpuDeviceInUse = deviceId;
   return sessions[kind];
+}
+
+// GPU が複数ある時（ノートPCの内蔵＋NVIDIA など）、1区間だけ試して一番速いものを選ぶ
+async function probeGpus(input) {
+  ort = ort || require('onnxruntime-node');
+  const results = [];
+  for (let id = 0; id < 4; id++) {
+    let sess = null;
+    try {
+      sess = await ort.InferenceSession.create(workerData.modelPath, sessionOptions('gpu', id));
+      const feed = { mix: new ort.Tensor('float32', input, [1, 2, SEG]) };
+      await sess.run(feed);                 // 1回目は準備を含むので数えない
+      const t0 = Date.now();
+      const out = await sess.run(feed);
+      const ms = Date.now() - t0;
+      if (looksBroken(out.stems.data, VOCALS * 2 * SEG, SEG)) throw new Error('結果が正しくありません');
+      results.push({ id, ms });
+    } catch (err) {
+      if (id > 0) break; // その番号の GPU がない（番号は詰めて並ぶので、ここで終わり）
+    } finally {
+      if (sess && sess.release) { try { await sess.release(); } catch (e) { /* 手放し済み */ } }
+    }
+  }
+  results.sort((a, b) => a.ms - b.ms);
+  return results;
 }
 
 async function dropSession(kind) {
@@ -87,12 +116,24 @@ async function separate(job) {
   const right = job.right;
   const n = left.length;
   const started = Date.now();
-  let kind = job.device === 'gpu' && gpuProvider() && !gpuBroken.flag ? 'gpu' : 'cpu';
+  let kind = job.device === 'gpu' && gpuProvider(0) && !gpuBroken.flag ? 'gpu' : 'cpu';
   let fellBack = job.device === 'gpu' && gpuBroken.flag ? '前に GPU を使えなかったため、CPU で分けました' : '';
   let sess = null;
+  let deviceId = Number.isInteger(job.gpuDevice) && job.gpuDevice >= 0 ? job.gpuDevice : -1;
+  let probe = null;
+  if (kind === 'gpu' && deviceId < 0) {
+    // どの GPU を使うか決まっていない → 最初の区間で試して選ぶ
+    parentPort.postMessage({ type: 'progress', id: job.id, done: 0, total: 0, phase: 'probe' });
+    const first = new Float32Array(2 * SEG);
+    first.set(left.subarray(0, Math.min(SEG, n)), 0);
+    first.set(right.subarray(0, Math.min(SEG, n)), SEG);
+    probe = await probeGpus(first);
+    if (probe.length) deviceId = probe[0].id;
+    else { kind = 'cpu'; gpuBroken.flag = true; fellBack = 'GPU を使えなかったため CPU で分けました'; }
+  }
   if (kind === 'gpu') {
     try {
-      sess = await getSession('gpu');
+      sess = await getSession('gpu', deviceId);
     } catch (err) {
       gpuBroken.flag = true; gpuBroken.reason = String((err && err.message) || err);
       fellBack = 'GPU を使えなかったため CPU で分けました';
@@ -147,10 +188,11 @@ async function separate(job) {
     outL[i] /= w;
     outR[i] /= w;
   }
-  const g = gpuProvider();
+  const g = gpuProvider(deviceId);
+  const label = kind === 'gpu' ? (g ? g.label.replace('）', '・' + (deviceId + 1) + '番目）') : 'GPU') : 'CPU';
   return {
     left: outL, right: outR,
-    stats: { device: kind === 'gpu' ? (g ? g.label : 'GPU') : 'CPU', ms: Date.now() - started, prepMs, fellBack, seconds: n / 44100 }
+    stats: { device: label, gpuDevice: kind === 'gpu' ? deviceId : null, probe, ms: Date.now() - started, prepMs, fellBack, seconds: n / 44100 }
   };
 }
 

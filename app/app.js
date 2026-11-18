@@ -15,7 +15,7 @@
   var SEEK_SMALL = 10;          // ←→ キーと「10秒」ボタンで動かす秒数
   var SEEK_LARGE = 60;          // Shift+←→ と「1分」ボタンで動かす秒数
   var ASK_OUTPUTS = '__ask';    // 出力の選択肢「ほかの出力デバイスを表示…」
-  var APP_VERSION = '0.10.2'; // index.html の版と違えば、古いファイルが読み込まれている
+  var APP_VERSION = '0.10.3'; // index.html の版と違えば、古いファイルが読み込まれている
   var AUDIO_EXT = /\.(wav|wave|mp3|m4a|aac|flac|ogg|oga|opus|aif|aiff|mp4|m4v|mov)$/i;
   var LOUD_TARGET = -11;       // オートゲインの目標（LUFS）
   var GAIN_ADJ_MAX = 12;       // 曲ごとの微調整の幅（±dB）
@@ -2633,11 +2633,15 @@
     audio.decodeFile(t.file).then(function (buffer) {
       return audio.toStereo44k(buffer);
     }).then(function (pcm) {
-      return window.ponNative.separateVocals(job.jobId, pcm.left, pcm.right, function (done, total) {
+      return window.ponNative.separateVocals(job.jobId, pcm.left, pcm.right, function (done, total, phase) {
         job.done = done;
         job.total = total;
+        job.phase = phase || '';
         renderVocalProgress();
-      }, vocalGpuSupported() && vocalUseGpu ? 'gpu' : 'cpu');
+      }, {
+        device: vocalGpuSupported() && vocalUseGpu ? 'gpu' : 'cpu',
+        gpuDevice: loadSetting('vocalGpuDevice', '') === '' ? null : Number(loadSetting('vocalGpuDevice', ''))
+      });
     }).then(function (res) {
       var blob = audio.encodeWav16(res.left, res.right, 44100);
       var saving = storeOk ? store.putFile(vocalKey(id), blob) : Promise.resolve();
@@ -2647,6 +2651,9 @@
         tt.vocalFile = blob;
         tt.vocal = { level: 1 };
         tt.vocalInfo = vocalStatText(res.stats);
+        // 速かった GPU を覚えておく（GPU で失敗した時は、次に選び直す）
+        if (res.stats && res.stats.gpuDevice != null) saveSetting('vocalGpuDevice', String(res.stats.gpuDevice));
+        else if (res.stats && res.stats.fellBack) saveSetting('vocalGpuDevice', '');
         toast('「' + tt.name + '」のボーカルを分けました' + (tt.vocalInfo ? '（' + tt.vocalInfo + '）' : '') + (res.stats && res.stats.fellBack ? '。' + res.stats.fellBack : ''));
         if (buffers.has(id)) return loadVocalBuffer(tt);
       });
@@ -2664,9 +2671,10 @@
   // GPU で分ける（Mac：CoreML、Windows：DirectML）。使えない・失敗した時は自動で CPU
   var vocalUseGpu = true;
 
+  // GPU で分けるのは Windows だけ（Mac の CoreML は準備に5分ほどかかり、実用にならなかった）
   function vocalGpuSupported() {
     var pf = window.ponNative && window.ponNative.platform;
-    return pf === 'darwin' || pf === 'win32';
+    return pf === 'win32';
   }
 
   function vocalStatText(st) {
@@ -2704,7 +2712,7 @@
     if (!vocalJob || vocalJob.id !== selectedId) return;
     var pct = vocalJob.total ? Math.round(vocalJob.done / vocalJob.total * 100) : 0;
     $('vocalProgressBar').style.width = pct + '%';
-    $('vocalNote').textContent = vocalJob.total ? 'ボーカルを分けています… ' + pct + '%' : 'ボーカルを分ける準備をしています…';
+    $('vocalNote').textContent = vocalJob.total ? 'ボーカルを分けています… ' + pct + '%' : vocalJob.phase === 'probe' ? 'どの GPU が速いか試しています…（最初の1回だけ）' : 'ボーカルを分ける準備をしています…';
   }
 
   function renderVocal(t, state) {
