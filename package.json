@@ -8,7 +8,7 @@
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "test": "node --test test/cue-engine.test.js test/backup.test.js test/version.test.js",
+    "test": "node --test test/cue-engine.test.js test/backup.test.js test/version.test.js test/build.test.js",
     "build:mac": "electron-builder --mac --publish never",
     "build:win": "electron-builder --win --publish never"
   },
@@ -49,8 +49,16 @@
         "CFBundleDisplayName": "ポン出し"
       },
       "files": [
+        "main.js",
+        "preload.js",
+        "sep-worker.js",
+        "app/**/*",
+        "package.json",
+        "node_modules/onnxruntime-node/**/*",
+        "node_modules/onnxruntime-common/**/*",
         "!node_modules/onnxruntime-node/bin/napi-v6/win32/**",
-        "!node_modules/onnxruntime-node/bin/napi-v6/darwin/x64/**"
+        "!node_modules/onnxruntime-node/bin/napi-v6/darwin/x64/**",
+        "!node_modules/onnxruntime-node/bin/napi-v6/linux/**"
       ]
     },
     "dmg": {
@@ -82,8 +90,16 @@
       "icon": "build/icon.png",
       "signAndEditExecutable": false,
       "files": [
+        "main.js",
+        "preload.js",
+        "sep-worker.js",
+        "app/**/*",
+        "package.json",
+        "node_modules/onnxruntime-node/**/*",
+        "node_modules/onnxruntime-common/**/*",
         "!node_modules/onnxruntime-node/bin/napi-v6/darwin/**",
-        "!node_modules/onnxruntime-node/bin/napi-v6/win32/arm64/**"
+        "!node_modules/onnxruntime-node/bin/napi-v6/win32/arm64/**",
+        "!node_modules/onnxruntime-node/bin/napi-v6/linux/**"
       ]
     },
     "nsis": {
