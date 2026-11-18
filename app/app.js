@@ -15,12 +15,16 @@
   var SEEK_SMALL = 10;          // ←→ キーと「10秒」ボタンで動かす秒数
   var SEEK_LARGE = 60;          // Shift+←→ と「1分」ボタンで動かす秒数
   var ASK_OUTPUTS = '__ask';    // 出力の選択肢「ほかの出力デバイスを表示…」
-  var APP_VERSION = '0.9.1'; // index.html の版と違えば、古いファイルが読み込まれている
+  var APP_VERSION = '0.10.0'; // index.html の版と違えば、古いファイルが読み込まれている
   var AUDIO_EXT = /\.(wav|wave|mp3|m4a|aac|flac|ogg|oga|opus|aif|aiff|mp4|m4v|mov)$/i;
+  var LOUD_TARGET = -11;       // オートゲインの目標（LUFS）
+  var GAIN_ADJ_MAX = 12;       // 曲ごとの微調整の幅（±dB）
   var VIDEO_EXT = /\.(mp4|m4v|mov)$/i; // 動画ファイルは音声だけ取り出して鳴らす
 
   var engine = window.PonCueEngine.createEngine({ goMode: loadSetting('goMode', 'double') });
   var audio = window.PonAudioEngine.createAudioEngine();
+  // BGM は本編・SE と別の出力に出せるよう、別の再生系統にする（Ver. 0.10.0）
+  var bgmAudio = window.PonAudioEngine.createAudioEngine();
 
   var tracks = new Map();   // id -> { id, file, fileName, name, ext, status, error, info, afterAction }
   var buffers = new Map();  // id -> AudioBuffer（先読み済みの曲だけ）
@@ -224,6 +228,7 @@
       loop: t.afterAction === 'loop',
       loopStart: r.start,
       vocal: t.vocal && vocalBuffers.has(t.id) ? { buffer: vocalBuffers.get(t.id), level: t.vocal.level } : null,
+      trim: dbToGain(trackGainDb(t)),
       onEnded: function () { onVoiceEnded(entry); }
     };
   }
@@ -233,6 +238,45 @@
     if (!current || !t || current.trackId !== t.id || !t.info) return;
     var r = rangeOf(t);
     audio.setVoiceRange(current.voice, t.afterAction === 'loop', r.start, r.end);
+  }
+
+  // ---------- オートゲイン（本編の音量をそろえる） ----------
+  // 曲ごとに統合ラウドネス（LUFS）を測り、目標に合わせて曲全体に一定のゲインをかけるだけ。
+  // リミッター・コンプは一切使わない純粋なゲイン調整（上げた結果ピークを超えても抑えない）。
+  var autoGainOn = true;
+
+  function autoGainInfo(t) {
+    if (!t || !t.loud || t.loud.lufs == null || !isFinite(t.loud.lufs)) return { db: 0, measured: !!(t && t.loud) };
+    return { db: Math.round((LOUD_TARGET - t.loud.lufs) * 10) / 10, measured: true };
+  }
+
+  function trackGainDb(t) {
+    if (!t) return 0;
+    return (autoGainOn ? autoGainInfo(t).db : 0) + (t.gainAdj || 0);
+  }
+
+  function fmtDb(db) {
+    var v = Math.round(db * 10) / 10;
+    if (Math.abs(v) < 0.05) v = 0;
+    return (v > 0 ? '+' : v < 0 ? '−' : '±') + Math.abs(v).toFixed(1) + ' dB';
+  }
+
+  function applyGainToCurrent(t) {
+    if (!current || !t || current.trackId !== t.id || !current.voice) return;
+    audio.setTrim(current.voice, dbToGain(trackGainDb(t)));
+  }
+
+  // オートキュー：頭の無音（約 -60dB 以下）を、音の出だしの 0.05 秒手前まで詰める。
+  // 手で開始位置を決めた曲・再生中の曲は変えない。詰めたら true
+  function autoTrimHead(t) {
+    if (!t || !t.info || t.info.allSilent || t.info.headSilence < 0.05) return false;
+    if ((t.inPoint || 0) > 0) return false;
+    if (current && current.trackId === t.id) return false;
+    var a = Math.max(0, t.info.headSilence - 0.05);
+    var end = t.outPoint != null ? t.outPoint : t.info.duration;
+    if (end - a < 0.5 || a <= 0.01) return false;
+    t.inPoint = a;
+    return true;
   }
 
   function fmtPrecise(sec) {
@@ -339,7 +383,12 @@
       outPoint: data.outPoint != null ? data.outPoint : null,
       cue: normalizeCue(data.cue), // きっかけメモ { type, text }
       vocal: data.vocal && data.vocalFile ? { level: clampLevel(data.vocal.level) } : null, // ボーカル調整（分離済みの時だけ）
-      vocalFile: data.vocal ? data.vocalFile || null : null
+      vocalFile: data.vocal ? data.vocalFile || null : null,
+      // オートゲイン：測ったラウドネスとピーク、曲ごとの微調整（dB）
+      loud: data.loud && typeof data.loud === 'object' ? { lufs: data.loud.lufs == null ? null : Number(data.loud.lufs), peakDb: data.loud.peakDb == null ? null : Number(data.loud.peakDb) } : null,
+      gainAdj: isFinite(Number(data.gainAdj)) ? Math.max(-GAIN_ADJ_MAX, Math.min(GAIN_ADJ_MAX, Number(data.gainAdj))) : 0,
+      // オートキュー：'pending' なら、調べ終わった時に頭の無音を詰める（新しく取り込んだ曲）
+      autoCue: data.autoCue === 'pending' ? 'pending' : 'done'
     });
     g.trackIds.push(id);
     engine.addTrack({ id: id, ready: false });
@@ -378,7 +427,8 @@
         fileName: it.file.name,
         name: it.file.name.replace(/\.[^.]+$/, ''),
         ext: (it.file.name.match(/\.([^.]+)$/) || ['', ''])[1].toUpperCase(),
-        afterAction: 'stop'
+        afterAction: 'stop',
+        autoCue: 'pending'
       });
       saveFile(id, it.file);
       ids.push(id);
@@ -487,12 +537,18 @@
     return jobs.shift();
   }
 
+  var autoCueCount = 0;
+
   function pump() {
     if (working) return;
     working = true;
     (function next() {
       if (!jobs.length) {
         working = false;
+        if (autoCueCount) {
+          toast(autoCueCount + '曲の頭の無音を自動で詰めました（再生範囲で戻せます）');
+          autoCueCount = 0;
+        }
         return;
       }
       var id = takeNextJob();
@@ -509,6 +565,21 @@
           t.info = audio.analyze(buffer);
           t.status = 'ok';
         }
+        if (t.autoCue === 'pending') {
+          if (autoTrimHead(t)) autoCueCount++;
+          t.autoCue = 'done';
+        }
+        // オートゲイン用に一度だけラウドネスを測る（結果は保存するので、次からは測らない）
+        var measuring = t.loud ? Promise.resolve() : audio.measureLoudness(buffer).then(function (r) {
+          if (!tracks.has(id)) return;
+          t.loud = {
+            lufs: isFinite(r.lufs) ? Math.round(r.lufs * 100) / 100 : null,
+            peakDb: isFinite(r.peakDb) ? Math.round(r.peakDb * 100) / 100 : null
+          };
+          applyGainToCurrent(t);
+        }, function () { /* 測れなくても補正なしで鳴らす */ });
+        return measuring.then(function () {
+          if (!tracks.has(id)) return;
         // 先読み対象の曲だけメモリに残す。それ以外は必要になった時に読み直す
         if (engine.preloadIds(PRELOAD_AHEAD).indexOf(id) >= 0) {
           buffers.set(id, buffer);
@@ -517,6 +588,7 @@
             if (tracks.has(id) && buffers.has(id)) engine.setReady(id, true);
           });
         }
+        });
       }, function (err) {
         if (!tracks.has(id)) return;
         t.status = 'error';
@@ -963,6 +1035,8 @@
       titleCell.appendChild(cell('title-text', t.name));
       if (isVideoTrack(t)) titleCell.appendChild(cell('video-tag', '映像'));
       if (t.vocal && t.vocal.level < 0.995) titleCell.appendChild(cell('vocal-tag', 'Vo ' + Math.round(t.vocal.level * 100) + '%'));
+      var gdb = trackGainDb(t);
+      if (t.loud && Math.abs(gdb) >= 0.5) titleCell.appendChild(cell('gain-tag', fmtDb(gdb).replace(' ', '')));
       titleCell.title = locked ? '' : 'ダブルクリックで曲名を変更';
 
       row.appendChild(titleCell);
@@ -1083,6 +1157,8 @@
     $('moveUpBtn').disabled = locked || index <= 0;
     $('moveDownBtn').disabled = locked || index < 0 || index >= count - 1;
     $('removeBtn').disabled = locked || t.id === state.playingId;
+    $('trimHeadAll').disabled = locked;
+    renderGain(t);
     renderVocal(t, state);
     renderCueEditor(t);
     renderFolds(t);
@@ -1092,11 +1168,12 @@
   // ---------- 折りたたみ（再生範囲・ボーカル） ----------
   // 開くかどうか：見出しを押した時はその通り。押していなければ「使っている曲」だけ自動で開く。
   // 別の曲を選ぶと、自動に戻る
-  var foldState = { range: null, vocal: null };
+  var foldState = { range: null, gain: null, vocal: null };
   var foldTrackId = null;
 
   function foldAuto(name, t) {
     if (name === 'range') return rangeOf(t).set;
+    if (name === 'gain') return !!t.gainAdj;
     return !!(t.vocal || (vocalJob && vocalJob.id === t.id) || vocalQueue.indexOf(t.id) >= 0);
   }
 
@@ -1105,6 +1182,10 @@
       var r = rangeOf(t);
       return r.set ? fmtPrecise(r.start) + ' 〜 ' + fmtPrecise(r.end) : '曲の全体';
     }
+    if (name === 'gain') {
+      if (!t.loud) return t.status === 'error' ? '—' : '測っています…';
+      return fmtDb(trackGainDb(t)) + (t.gainAdj ? '（微調整あり）' : '');
+    }
     if (vocalJob && vocalJob.id === t.id) return '分けています…';
     if (vocalQueue.indexOf(t.id) >= 0) return '順番待ち';
     if (t.vocal) return t.vocal.level >= 0.995 ? '分離済み・100%' : '分離済み・' + Math.round(t.vocal.level * 100) + '%';
@@ -1112,10 +1193,10 @@
   }
 
   function renderFolds(t) {
-    if (foldTrackId !== t.id) { foldTrackId = t.id; foldState = { range: null, vocal: null }; }
-    ['range', 'vocal'].forEach(function (name) {
+    if (foldTrackId !== t.id) { foldTrackId = t.id; foldState = { range: null, gain: null, vocal: null }; }
+    ['range', 'gain', 'vocal'].forEach(function (name) {
       var open = foldState[name] != null ? foldState[name] : foldAuto(name, t);
-      var box = $(name === 'range' ? 'rangeGroup' : 'vocalGroup');
+      var box = $(name + 'Group');
       box.classList.toggle('is-open', open);
       var head = box.querySelector('.fold-head');
       head.setAttribute('aria-expanded', String(open));
@@ -1126,9 +1207,70 @@
   function toggleFold(name) {
     var t = selectedId && tracks.get(selectedId);
     if (!t) return;
-    var box = $(name === 'range' ? 'rangeGroup' : 'vocalGroup');
+    var box = $(name + 'Group');
     foldState[name] = !box.classList.contains('is-open');
     renderFolds(t);
+  }
+
+  function renderGain(t) {
+    var note = $('gainNote');
+    note.textContent = '';
+    var a = autoGainInfo(t);
+    if (!t.loud) {
+      note.textContent = t.status === 'error' ? '読み込めない曲です' : 'ラウドネスを測っています…';
+    } else if (t.loud.lufs == null) {
+      note.textContent = '音が入っていないため、補正しません';
+    } else {
+      var line = 'ラウドネス ' + t.loud.lufs.toFixed(1).replace('-', '−') + ' LUFS（ピーク ' + (t.loud.peakDb == null ? '—' : t.loud.peakDb.toFixed(1).replace('-', '−')) + ' dB）';
+      note.appendChild(document.createTextNode(line));
+      note.appendChild(document.createElement('br'));
+      if (!autoGainOn) note.appendChild(document.createTextNode('オートゲインは切っています'));
+      else note.appendChild(document.createTextNode('自動 ' + fmtDb(a.db) + '（目標 ' + String(LOUD_TARGET).replace('-', '−') + ' LUFS）'));
+      var total = trackGainDb(t);
+      if (t.loud.peakDb != null && t.loud.peakDb + total > 0) {
+        note.appendChild(document.createElement('br'));
+        var w2 = document.createElement('span');
+        w2.className = 'is-warn';
+        w2.textContent = 'ピークが 0 dB を超えます（クリップする可能性があります）';
+        note.appendChild(w2);
+      }
+    }
+    $('gainValue').textContent = fmtDb(trackGainDb(t));
+    $('gainValue').title = '微調整 ' + fmtDb(t.gainAdj || 0);
+    $('gainDown').disabled = !t.loud || (t.gainAdj || 0) <= -GAIN_ADJ_MAX;
+    $('gainUp').disabled = !t.loud || (t.gainAdj || 0) >= GAIN_ADJ_MAX;
+    $('gainReset').disabled = !t.gainAdj;
+    var tg = $('autoGainToggle');
+    tg.setAttribute('aria-pressed', String(autoGainOn));
+    tg.disabled = locked;
+  }
+
+  function setGainAdj(t, db) {
+    if (!t) return;
+    t.gainAdj = Math.max(-GAIN_ADJ_MAX, Math.min(GAIN_ADJ_MAX, Math.round(db * 10) / 10));
+    if (Math.abs(t.gainAdj) < 0.05) t.gainAdj = 0;
+    applyGainToCurrent(t);
+    afterChange();
+  }
+
+  function setAutoGain(on) {
+    autoGainOn = !!on;
+    saveSetting('autoGain', autoGainOn ? '1' : '0');
+    if (current) applyGainToCurrent(tracks.get(current.trackId));
+    render();
+    toast(autoGainOn ? 'オートゲインを入れました（本編の音量をそろえます）' : 'オートゲインを切りました（元の音量で鳴らします）');
+  }
+
+  function trimHeadAll() {
+    if (locked) return;
+    var n = 0, waiting = 0;
+    tracks.forEach(function (t) {
+      if (!t.info) { if (t.status !== 'error' && !(t.inPoint > 0)) { t.autoCue = 'pending'; waiting++; } return; }
+      if (autoTrimHead(t)) n++;
+    });
+    afterChange();
+    if (n || waiting) toast((n ? n + '曲の頭の無音を詰めました' : '') + (waiting ? (n ? '。' : '') + '読み込み中の' + waiting + '曲は、読み込めたら詰めます' : ''));
+    else toast('詰める曲はありませんでした（開始位置を手で決めた曲は変えません）');
   }
 
   function renderCueEditor(t) {
@@ -1451,6 +1593,14 @@
   // ブラウザは、許可を出すまで出力デバイスの名前を教えてくれない。
   // その場合は「ほかの出力デバイスを表示…」を選択肢に出し、選ばれたら許可を求める。
   function refreshOutputs(announce) {
+    return refreshMainOutput(announce).then(function (count) {
+      return refreshBgmOutput().then(function () { return count; }, function () { return count; });
+    });
+  }
+
+  var lastNamedOutputs = [];
+
+  function refreshMainOutput(announce) {
     var select = $('outputSelect');
     if (!audio.canSelectOutput()) {
       select.disabled = true;
@@ -1463,6 +1613,7 @@
       var named = devices.filter(function (d) {
         return d.label && d.id && d.id !== 'default' && d.id !== 'communications';
       });
+      lastNamedOutputs = named;
       select.textContent = '';
       addOption(select, 'default', '既定の出力');
       named.forEach(function (d) { addOption(select, d.id, d.label); });
@@ -1676,6 +1827,13 @@
       if (e.target === e.currentTarget) closeShowsDialog();
     });
     $('rangeFoldHead').addEventListener('click', function () { toggleFold('range'); });
+    $('gainFoldHead').addEventListener('click', function () { toggleFold('gain'); });
+    $('trimHeadAll').addEventListener('click', function (e) { e.currentTarget.blur(); trimHeadAll(); });
+    $('gainDown').addEventListener('click', function (e) { e.currentTarget.blur(); var t = selectedTrack(); if (t) setGainAdj(t, (t.gainAdj || 0) - 0.5); });
+    $('gainUp').addEventListener('click', function (e) { e.currentTarget.blur(); var t = selectedTrack(); if (t) setGainAdj(t, (t.gainAdj || 0) + 0.5); });
+    $('gainReset').addEventListener('click', function (e) { e.currentTarget.blur(); var t = selectedTrack(); if (t) setGainAdj(t, 0); });
+    $('autoGainToggle').addEventListener('click', function (e) { e.currentTarget.blur(); if (!locked) setAutoGain(!autoGainOn); });
+    autoGainOn = loadSetting('autoGain', '1') !== '0';
     $('vocalFoldHead').addEventListener('click', function () { toggleFold('vocal'); });
     $('cueText').addEventListener('input', function (e) {
       var t = selectedId && tracks.get(selectedId);
@@ -1767,6 +1925,7 @@
       audio.setOutput(value).then(function () {
         saveSetting('output', value);
         saveSetting('outputLabel', label);
+        refreshBgmOutput(); // BGM が「本編と同じ」ならついていく
       }, function () {
         toast('出力デバイスを切り替えられませんでした');
         select.value = 'default';
@@ -1775,6 +1934,25 @@
     if (navigator.mediaDevices && navigator.mediaDevices.addEventListener) {
       navigator.mediaDevices.addEventListener('devicechange', function () { refreshOutputs(false); });
     }
+    $('bgmOutputSelect').addEventListener('change', function (e) {
+      var select = e.target;
+      var value = select.value;
+      select.blur();
+      if (value === ASK_OUTPUTS) {
+        toast('出力デバイスの名前を表示するには、ブラウザの「マイクの許可」が必要です（録音はしません）');
+        audio.requestDeviceNames().then(function () { return refreshOutputs(false); }).then(null, function () {
+          toast('許可されなかったため、出力デバイスを表示できませんでした');
+          refreshBgmOutput();
+        });
+        return;
+      }
+      var label = value === BGM_SAME || value === 'default' ? '' : select.options[select.selectedIndex].textContent.replace(/^（見つかりません）/, '');
+      saveSetting('bgmOutput', value);
+      saveSetting('bgmOutputLabel', label);
+      refreshBgmOutput().then(function () {
+        if (!bgmOutLost) toast('BGMの出力：' + (value === BGM_SAME ? '本編と同じ' : value === 'default' ? '既定の出力' : label));
+      });
+    });
 
     // 本番ロック
     $('lockBtn').addEventListener('click', function () { setLocked(!locked); });
@@ -2027,6 +2205,9 @@
       saved[t.id] = { name: t.name, fileName: t.fileName, ext: t.ext, afterAction: t.afterAction, inPoint: t.inPoint || 0, outPoint: t.outPoint };
       if (t.vocal) saved[t.id].vocal = { level: t.vocal.level };
       if (hasCue(t)) saved[t.id].cue = { type: t.cue.type, text: t.cue.text };
+      if (t.loud) saved[t.id].loud = { lufs: t.loud.lufs, peakDb: t.loud.peakDb };
+      if (t.gainAdj) saved[t.id].gainAdj = t.gainAdj;
+      if (t.autoCue === 'pending') saved[t.id].autoCue = 'pending';
     });
     return {
       id: show.id,
@@ -2151,7 +2332,10 @@
           ext: x.data.ext,
           afterAction: x.data.afterAction,
           inPoint: x.data.inPoint,
-          outPoint: x.data.outPoint
+          outPoint: x.data.outPoint,
+          loud: x.data.loud,
+          gainAdj: x.data.gainAdj,
+          autoCue: x.data.autoCue
         });
       });
       syncOrder();
@@ -3079,6 +3263,82 @@
 
   // ---------- BGM ----------
 
+  // ----- BGM の出力先（Ver. 0.10.0） -----
+  // 「本編と同じ」なら本編の出力についていく。別の機器を選んでいて、それが見つからない・抜けた時は
+  // BGM を止めて警告を出す（本編のフェーダーに BGM が急に混ざらないように、ほかの出力には逃がさない）
+  var BGM_SAME = 'same';
+  var bgmOutLost = null;   // 見つからない出力の名前
+
+  function mainOutputValue() {
+    var v = $('outputSelect').value;
+    return !v || v === ASK_OUTPUTS ? 'default' : v;
+  }
+
+  function refreshBgmOutput() {
+    var sel = $('bgmOutputSelect');
+    if (!audio.canSelectOutput()) {
+      sel.textContent = '';
+      addOption(sel, BGM_SAME, '本編と同じ');
+      sel.disabled = true;
+      sel.title = 'この環境では出力デバイスを選べません';
+      return Promise.resolve();
+    }
+    var wanted = loadSetting('bgmOutput', BGM_SAME);
+    var wantedLabel = loadSetting('bgmOutputLabel', '');
+    var named = lastNamedOutputs;
+    sel.textContent = '';
+    addOption(sel, BGM_SAME, '本編と同じ');
+    addOption(sel, 'default', '既定の出力');
+    named.forEach(function (d) { addOption(sel, d.id, d.label); });
+    if (!named.length) addOption(sel, ASK_OUTPUTS, 'ほかの出力デバイスを表示…');
+
+    var target = null;
+    if (wanted === BGM_SAME) target = mainOutputValue();
+    else if (wanted === 'default') target = 'default';
+    else {
+      var match = null;
+      named.forEach(function (d) { if (!match && d.id === wanted) match = d; });
+      if (!match && wantedLabel) named.forEach(function (d) { if (!match && d.label === wantedLabel) match = d; });
+      if (match) { target = match.id; wanted = match.id; }
+    }
+    if (target == null) {
+      addOption(sel, wanted, '（見つかりません）' + (wantedLabel || '選んだ出力'));
+      sel.value = wanted;
+      setBgmOutLost(wantedLabel || '選んだ出力');
+      return Promise.resolve();
+    }
+    sel.value = wanted;
+    return bgmAudio.setOutput(target).then(function () {
+      setBgmOutLost(null);
+    }, function () {
+      setBgmOutLost(wantedLabel || '選んだ出力');
+    });
+  }
+
+  function setBgmOutLost(label) {
+    var was = bgmOutLost;
+    bgmOutLost = label;
+    if (label && !was) {
+      // 鳴っていれば止める（位置は覚えておくので「再生」で続きから）
+      if (bgmNow) bgmPause(0.05);
+      bgmTails.forEach(function (v) { bgmAudio.cut(v); });
+      bgmTails = [];
+      toast('BGMの出力「' + label + '」が見つかりません。BGMを止めました');
+    } else if (!label && was) {
+      toast('BGMの出力「' + was + '」がつながりました（BGMは止まったままです）');
+    }
+    var warn = $('bgmOutWarn');
+    warn.hidden = !label;
+    warn.textContent = label ? '⚠ BGMの出力「' + label + '」が見つかりません。つなぎ直すか、出力を選び直してください' : '';
+    $('bgmPanel').classList.toggle('is-out-lost', !!label);
+  }
+
+  function bgmBlocked() {
+    if (!bgmOutLost) return false;
+    toast('BGMの出力「' + bgmOutLost + '」が見つからないため、BGMを鳴らせません');
+    return true;
+  }
+
   function clampBgmDb(db) {
     return isFinite(db) ? Math.max(-30, Math.min(12, db)) : 0;
   }
@@ -3089,7 +3349,7 @@
   }
 
   function getBgmBus() {
-    if (!bgmBus) bgmBus = audio.createBus(Math.pow(10, bgmDb / 20));
+    if (!bgmBus) bgmBus = bgmAudio.createBus(Math.pow(10, bgmDb / 20));
     return bgmBus;
   }
 
@@ -3169,7 +3429,7 @@
     return getting.then(function (file) {
       if (!file) throw new Error('保存されたデータが見つかりません');
       t.file = file;
-      return audio.decodeFile(file);
+      return bgmAudio.decodeFile(file);
     }).then(function (buffer) {
       bgmBuffers.set(id, buffer);
       if (!t.duration || Math.abs(t.duration - buffer.duration) > 0.5) { t.duration = buffer.duration; saveBgm(); }
@@ -3193,13 +3453,14 @@
   function fadeOutBgmVoice(voice, seconds) {
     if (!voice) return;
     bgmTails.push(voice);
-    audio.fade(voice, seconds, function () {
+    bgmAudio.fade(voice, seconds, function () {
       bgmTails = bgmTails.filter(function (v) { return v !== voice; });
     });
   }
 
   // プレイリストを再生する。startId を指定するとその曲から
   function bgmPlay(listId, startId) {
+    if (bgmBlocked()) return;
     var list = bgmList(listId);
     if (!list || !list.trackIds.length) { toast('プレイリストに曲がありません'); return; }
     var order = list.shuffle ? shuffled(list.trackIds) : list.trackIds.slice();
@@ -3219,7 +3480,7 @@
   function bgmPause(fadeSeconds) {
     var now = bgmNow;
     if (!now || bgmFading) return;
-    var pos = now.voice ? audio.position(now.voice) : 0;
+    var pos = now.voice ? bgmAudio.position(now.voice) : 0;
     bgmPaused = { listId: now.listId, order: now.order, index: now.index, trackId: now.trackId, offset: pos };
     bgmToken++;
     if (now.voice) fadeOutBgmVoice(now.voice, fadeSeconds == null ? 1.0 : fadeSeconds);
@@ -3231,6 +3492,7 @@
   function bgmResume() {
     var p = bgmPaused;
     if (!p) return;
+    if (bgmBlocked()) return;
     var list = bgmList(p.listId);
     if (!list || list.trackIds.indexOf(p.trackId) < 0) { bgmPaused = null; bgmPlay(bgmListId); return; }
     bgmPaused = null;
@@ -3262,7 +3524,7 @@
     render();
     loadBgmBuffer(id).then(function (buffer) {
       if (token !== bgmToken || bgmNow !== now) return; // 途中で止めた・切り替えた
-      now.voice = audio.play(buffer, {
+      now.voice = bgmAudio.play(buffer, {
         output: getBgmBus(),
         offset: offset && offset < buffer.duration - 0.5 ? offset : 0,
         fadeIn: fadeIn ? BGM_FADE_IN : 0,
@@ -3287,15 +3549,15 @@
   function bgmStop(now) {
     bgmPaused = null; // 停止はプレイリストの頭に戻す
     if (!bgmNow) {
-      bgmTails.forEach(function (v) { audio.cut(v); });
+      bgmTails.forEach(function (v) { bgmAudio.cut(v); });
       bgmTails = [];
       return;
     }
     var voice = bgmNow.voice;
     if (now || bgmFading || !voice) {
       bgmToken++;
-      if (voice) audio.cut(voice);
-      bgmTails.forEach(function (v) { audio.cut(v); });
+      if (voice) bgmAudio.cut(voice);
+      bgmTails.forEach(function (v) { bgmAudio.cut(v); });
       bgmTails = [];
       bgmNow = null;
       bgmFading = false;
@@ -3304,7 +3566,7 @@
     }
     bgmFading = true;
     var target = bgmNow;
-    audio.fade(voice, BGM_FADE_SECONDS, function () {
+    bgmAudio.fade(voice, BGM_FADE_SECONDS, function () {
       if (bgmNow === target) { bgmNow = null; bgmFading = false; render(); }
     });
     render();
@@ -3331,7 +3593,7 @@
       $('bgmBar').style.width = '0%';
       return;
     }
-    var pos = audio.position(now.voice);
+    var pos = bgmAudio.position(now.voice);
     $('bgmNowTime').textContent = fmtShort(pos) + ' / ' + fmtShort(now.voice.duration);
     $('bgmBar').style.width = (Math.min(1, pos / now.voice.duration) * 100) + '%';
   }
@@ -3694,6 +3956,8 @@
     openShow: openShow,
     newShow: newShow,
     audio: audio,
+    bgmAudio: bgmAudio,
+    bgmOutLost: function () { return bgmOutLost; },
     tracks: tracks,
     buffers: buffers,
     importItems: importItems,

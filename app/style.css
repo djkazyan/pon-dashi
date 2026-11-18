@@ -1103,3 +1103,16 @@ button { cursor: pointer; }
 .update-ver { margin: 4px 0 0; font-size: 15px; font-weight: 700; }
 .update-notes { margin: 0; max-height: 220px; overflow: auto; white-space: pre-wrap; font: inherit; font-size: 13px; line-height: 1.6;
   background: var(--raised); border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px; }
+
+/* オートゲイン（Ver. 0.10.0） */
+.gain-note { margin: 0 0 8px; font-size: 12px; color: var(--muted); line-height: 1.6; }
+.gain-note .is-warn { color: var(--caution); }
+.gain-row { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; flex-wrap: wrap; }
+.gain-value { min-width: 78px; text-align: center; font-variant-numeric: tabular-nums; font-weight: 700; }
+.gain-tag { flex: none; font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; margin-left: 6px; }
+/* BGMの出力先 */
+.bgm-out { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
+.bgm-out .select { flex: 1; min-width: 0; }
+.bgm-out-warn { margin: 4px 0; padding: 6px 8px; border-radius: 6px; font-size: 12px; font-weight: 700;
+  color: #1a0b08; background: var(--danger); }
+.bgm-panel.is-out-lost { border-color: var(--danger); }

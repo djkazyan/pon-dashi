@@ -15,6 +15,7 @@
   function createAudioEngine() {
     var ctx = null;
     var master = null;
+    var pendingSink = null; // 音の系統を作る前に選ばれた出力（作った時に反映する）
 
     function ensureContext() {
       if (!ctx) {
@@ -22,6 +23,7 @@
         ctx = new Ctor({ latencyHint: 'interactive' });
         master = ctx.createGain();
         master.connect(ctx.destination);
+        if (pendingSink) { var sink = pendingSink; pendingSink = null; ctx.setSinkId(sink).catch(function () { /* 既定の出力のまま */ }); }
       }
       if (ctx.state === 'suspended') ctx.resume();
       return ctx;
@@ -134,7 +136,16 @@
       var gain = c.createGain();
       source.buffer = buffer;
       source.connect(gain);
-      gain.connect(opts.output || master);
+      // 曲ごとの音量補正（オートゲイン）。フェード用の gain とは分けておく
+      var trim = null;
+      if (opts.trim != null && opts.trim !== 1) {
+        trim = c.createGain();
+        trim.gain.value = opts.trim;
+        gain.connect(trim);
+        trim.connect(opts.output || master);
+      } else {
+        gain.connect(opts.output || master);
+      }
       var sources = [source];
 
       // ボーカル調整：分離したボーカルを、逆の向きで重ねて引く（量＝level、1でそのまま）
@@ -156,6 +167,8 @@
         sources: sources,
         vocalGain: vocalGain,
         gain: gain,
+        trim: trim,
+        output: opts.output || master,
         duration: buffer.duration,
         end: end,
         loop: !!opts.loop,
@@ -170,6 +183,7 @@
       source.onended = function () {
         voice.finished = true;
         try { gain.disconnect(); } catch (e) { /* 既に切断済み */ }
+        if (voice.trim) { try { voice.trim.disconnect(); } catch (e) { /* 既に切断済み */ } }
         if (voice.stopped) {
           if (voice.onStopped) voice.onStopped(voice);
         } else if (opts.onEnded) {
@@ -296,6 +310,98 @@
       return true;
     }
 
+    // 再生中の曲の音量補正を変える（なめらかに）。補正なしで始めた音にも後から入れられる
+    function setTrim(voice, value) {
+      if (!voice || voice.stopped || voice.finished || !ctx) return false;
+      var t = ctx.currentTime;
+      if (!voice.trim) {
+        if (value === 1) return true;
+        var trim = ctx.createGain();
+        trim.gain.value = 1;
+        trim.connect(voice.output);
+        try { voice.gain.disconnect(); } catch (e) { /* 切断済み */ }
+        voice.gain.connect(trim);
+        voice.trim = trim;
+      }
+      var g = voice.trim.gain;
+      g.cancelScheduledValues(t);
+      g.setValueAtTime(g.value, t);
+      g.linearRampToValueAtTime(value, t + 0.08);
+      return true;
+    }
+
+    // ラウドネス（ITU-R BS.1770 / EBU R128 の統合ラウドネス、LUFS）とサンプルピークを測る。
+    // K特性のフィルタ → 400ms ごと（100ms ずつずらす）の平均 → -70 LUFS と相対 -10 LU のゲート。
+    // 画面が固まらないよう、少しずつ区切って計算する。
+    function measureLoudness(buffer) {
+      var rate = buffer.sampleRate;
+      var length = buffer.length;
+      var chs = Math.min(buffer.numberOfChannels, 2);
+      // K特性 1段目（高域シェルフ）と2段目（ハイパス）。libebur128 と同じ式でサンプリング周波数に合わせる
+      var f0 = 1681.974450955533, G = 3.999843853973347, Q = 0.7071752369554196;
+      var K = Math.tan(Math.PI * f0 / rate);
+      var Vh = Math.pow(10, G / 20), Vb = Math.pow(Vh, 0.4996667741545416);
+      var a0 = 1 + K / Q + K * K;
+      var pb0 = (Vh + Vb * K / Q + K * K) / a0, pb1 = 2 * (K * K - Vh) / a0, pb2 = (Vh - Vb * K / Q + K * K) / a0;
+      var pa1 = 2 * (K * K - 1) / a0, pa2 = (1 - K / Q + K * K) / a0;
+      f0 = 38.13547087602444; Q = 0.5003270373238773;
+      K = Math.tan(Math.PI * f0 / rate);
+      var ra1 = 2 * (K * K - 1) / (1 + K / Q + K * K), ra2 = (1 - K / Q + K * K) / (1 + K / Q + K * K);
+
+      var seg = Math.max(1, Math.round(rate * 0.1)); // 100ms
+      var segCount = Math.ceil(length / seg);
+      var segPow = new Float64Array(segCount);
+      var peak = 0;
+      var CHUNK = Math.max(seg, Math.floor(1048576 / seg) * seg); // 約100万サンプルずつ
+
+      return new Promise(function (resolve) {
+        var c = 0, pos = 0;
+        // 1段目：入力 x1,x2／出力 y1,y2。2段目：入力（=1段目の出力）y1,y2／出力 w1,w2
+        var x1 = 0, x2 = 0, y1 = 0, y2 = 0, w1 = 0, w2 = 0;
+        function step() {
+          var d = buffer.getChannelData(c);
+          var end = Math.min(length, pos + CHUNK);
+          for (var i = pos; i < end; i++) {
+            var x = d[i];
+            var ax = x < 0 ? -x : x;
+            if (ax > peak) peak = ax;
+            var y = pb0 * x + pb1 * x1 + pb2 * x2 - pa1 * y1 - pa2 * y2;
+            var w = y - 2 * y1 + y2 - ra1 * w1 - ra2 * w2; // 2段目は b = (1, -2, 1)
+            x2 = x1; x1 = x; y2 = y1; y1 = y; w2 = w1; w1 = w;
+            segPow[(i / seg) | 0] += w * w;
+          }
+          pos = end;
+          if (pos >= length) {
+            c++; pos = 0; x1 = x2 = y1 = y2 = w1 = w2 = 0;
+            if (c >= chs) { resolve(finish()); return; }
+          }
+          setTimeout(step, 0);
+        }
+        setTimeout(step, 0);
+      });
+
+      function finish() {
+        var peakDb = peak > 0 ? 20 * Math.log10(peak) : -Infinity;
+        if (segCount < 4) return { lufs: -Infinity, peakDb: peakDb };
+        // モノラルは左右両方から同じ音が出るので、2チャンネル分として数える
+        if (buffer.numberOfChannels === 1) for (var k = 0; k < segCount; k++) segPow[k] *= 2;
+        var blocks = [];
+        for (var b = 0; b + 4 <= segCount; b++) {
+          var n = Math.min(4 * seg, length - b * seg);
+          var p = (segPow[b] + segPow[b + 1] + segPow[b + 2] + segPow[b + 3]) / n;
+          blocks.push(p);
+        }
+        function lufsOf(p) { return -0.691 + 10 * Math.log10(p); }
+        var abs = blocks.filter(function (p) { return p > 0 && lufsOf(p) > -70; });
+        if (!abs.length) return { lufs: -Infinity, peakDb: peakDb };
+        var mean = abs.reduce(function (a, v) { return a + v; }, 0) / abs.length;
+        var rel = lufsOf(mean) - 10;
+        var gated = abs.filter(function (p) { return lufsOf(p) > rel; });
+        var m2 = gated.reduce(function (a, v) { return a + v; }, 0) / gated.length;
+        return { lufs: lufsOf(m2), peakDb: peakDb };
+      }
+    }
+
     // 分離に渡すため、44.1kHz・2ch に揃える
     function toStereo44k(buffer) {
       var rate = 44100;
@@ -359,7 +465,8 @@
     function setOutput(deviceId) {
       if (!canSelectOutput()) return Promise.reject(new Error('この環境では出力デバイスを選べません'));
       var id = (!deviceId || deviceId === 'default') ? '' : deviceId;
-      return ensureContext().setSinkId(id);
+      if (!ctx) { pendingSink = id || null; return Promise.resolve(); } // まだ鳴らしていなければ、鳴らす時に
+      return ctx.setSinkId(id);
     }
 
     return {
@@ -370,6 +477,8 @@
       createBus: createBus,
       setVoiceRange: setVoiceRange,
       setVocalLevel: setVocalLevel,
+      setTrim: setTrim,
+      measureLoudness: measureLoudness,
       toStereo44k: toStereo44k,
       encodeWav16: encodeWav16,
       cut: cut,

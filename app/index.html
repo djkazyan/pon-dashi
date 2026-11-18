@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ポン出し</title>
-<link rel="stylesheet" href="style.css?v=0.9.1">
+<link rel="stylesheet" href="style.css?v=0.10.0">
 </head>
 <body>
 <div class="app" id="app">
@@ -12,7 +12,7 @@
   <header class="topbar">
     <div class="brand">
       <span class="brand-name">ポン出し</span>
-      <span class="brand-ver" id="appVersion" data-version="0.9.1">Ver. 0.9.1</span>
+      <span class="brand-ver" id="appVersion" data-version="0.10.0">Ver. 0.10.0</span>
       <button type="button" class="btn btn-small update-btn" id="updateBtn" hidden>新しい版があります</button>
       <input type="text" class="show-name" id="showName" aria-label="イベント名" maxlength="60" spellcheck="false">
       <span class="save-status" id="saveStatus">保存済み</span>
@@ -129,10 +129,26 @@
           <button type="button" class="btn btn-small" id="trimTail">末尾の無音を詰める</button>
         </div>
         <div class="detail-row">
+          <button type="button" class="btn btn-small" id="trimHeadAll" title="開始位置を手で決めていない曲だけ詰めます">全曲の頭の無音を詰める</button>
+        </div>
+        <div class="detail-row">
           <button type="button" class="btn btn-small" id="setInNow">今の位置を開始に</button>
           <button type="button" class="btn btn-small" id="setOutNow">今の位置を終了に</button>
           <button type="button" class="btn btn-small" id="rangeReset">範囲を戻す</button>
         </div>
+        </div>
+      </div>
+      <div class="detail-group fold" id="gainGroup">
+        <button type="button" class="fold-head" id="gainFoldHead" aria-expanded="false"><span class="fold-title">音量</span><span class="fold-summary"></span><span class="fold-arrow" aria-hidden="true"></span></button>
+        <div class="fold-body">
+        <p class="gain-note" id="gainNote"></p>
+        <div class="gain-row">
+          <button type="button" class="btn btn-small" id="gainDown" aria-label="0.5dB下げる">−0.5</button>
+          <span class="gain-value" id="gainValue">±0.0 dB</span>
+          <button type="button" class="btn btn-small" id="gainUp" aria-label="0.5dB上げる">＋0.5</button>
+          <button type="button" class="btn btn-small" id="gainReset">微調整を戻す</button>
+        </div>
+        <button type="button" class="toggle" id="autoGainToggle" aria-pressed="true">オートゲイン（本編の音量をそろえる）</button>
         </div>
       </div>
       <div class="detail-group fold" id="vocalGroup">
@@ -226,6 +242,11 @@
         <input type="range" class="se-volume-range" id="bgmVolume" min="-30" max="12" step="0.5" value="0">
         <button type="button" class="se-volume-value" id="bgmVolumeValue" title="押すと 0 dB に戻ります">0.0 dB</button>
       </div>
+      <div class="bgm-out">
+        <label class="seg-label" for="bgmOutputSelect">BGMの出力</label>
+        <select class="select select-small" id="bgmOutputSelect" aria-label="BGMの出力先"></select>
+      </div>
+      <div class="bgm-out-warn" id="bgmOutWarn" role="alert" hidden></div>
       <button type="button" class="toggle" id="bgmAutoFade" aria-pressed="true">本編のGOでBGMをフェードアウト</button>
     </section>
 
@@ -366,10 +387,10 @@
   </div>
 </div>
 
-<script src="cue-engine.js?v=0.9.1"></script>
-<script src="store.js?v=0.9.1"></script>
-<script src="audio-engine.js?v=0.9.1"></script>
-<script src="backup.js?v=0.9.1"></script>
-<script src="app.js?v=0.9.1"></script>
+<script src="cue-engine.js?v=0.10.0"></script>
+<script src="store.js?v=0.10.0"></script>
+<script src="audio-engine.js?v=0.10.0"></script>
+<script src="backup.js?v=0.10.0"></script>
+<script src="app.js?v=0.10.0"></script>
 </body>
 </html>
