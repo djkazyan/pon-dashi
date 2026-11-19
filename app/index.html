@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ポン出し</title>
-<link rel="stylesheet" href="style.css?v=0.10.3">
+<link rel="stylesheet" href="style.css?v=0.10.4">
 </head>
 <body>
 <div class="app" id="app">
@@ -12,7 +12,7 @@
   <header class="topbar">
     <div class="brand">
       <span class="brand-name">ポン出し</span>
-      <span class="brand-ver" id="appVersion" data-version="0.10.3">Ver. 0.10.3</span>
+      <span class="brand-ver" id="appVersion" data-version="0.10.4">Ver. 0.10.4</span>
       <button type="button" class="btn btn-small update-btn" id="updateBtn" hidden>新しい版があります</button>
       <input type="text" class="show-name" id="showName" aria-label="イベント名" maxlength="60" spellcheck="false">
       <span class="save-status" id="saveStatus">保存済み</span>
@@ -149,7 +149,7 @@
           <button type="button" class="btn btn-small" id="gainUp" aria-label="0.5dB上げる">＋0.5</button>
           <button type="button" class="btn btn-small" id="gainReset">微調整を戻す</button>
         </div>
-        <button type="button" class="toggle" id="autoGainToggle" aria-pressed="true">オートゲイン（本編の音量をそろえる）</button>
+        <button type="button" class="toggle" id="autoGainToggle" aria-pressed="true">オートゲイン（本編と BGM の音量をそろえる）</button>
         </div>
       </div>
       <div class="detail-group fold" id="vocalGroup">
@@ -184,6 +184,7 @@
           <span>グループ</span>
           <select id="moveGroupSelect" aria-label="この曲のグループ"></select>
         </label>
+        <button type="button" class="btn btn-small align-after" id="alignAfter" title="次の曲のキッカケに合わせて、このグループの全曲の「終了後」をそろえ直します">キッカケに合わせて終了後をそろえる</button>
       </div>
     </aside>
 
@@ -415,10 +416,10 @@
   </div>
 </div>
 
-<script src="cue-engine.js?v=0.10.3"></script>
-<script src="store.js?v=0.10.3"></script>
-<script src="audio-engine.js?v=0.10.3"></script>
-<script src="backup.js?v=0.10.3"></script>
-<script src="app.js?v=0.10.3"></script>
+<script src="cue-engine.js?v=0.10.4"></script>
+<script src="store.js?v=0.10.4"></script>
+<script src="audio-engine.js?v=0.10.4"></script>
+<script src="backup.js?v=0.10.4"></script>
+<script src="app.js?v=0.10.4"></script>
 </body>
 </html>

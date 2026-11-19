@@ -15,7 +15,7 @@
   var SEEK_SMALL = 10;          // ←→ キーと「10秒」ボタンで動かす秒数
   var SEEK_LARGE = 60;          // Shift+←→ と「1分」ボタンで動かす秒数
   var ASK_OUTPUTS = '__ask';    // 出力の選択肢「ほかの出力デバイスを表示…」
-  var APP_VERSION = '0.10.3'; // index.html の版と違えば、古いファイルが読み込まれている
+  var APP_VERSION = '0.10.4'; // index.html の版と違えば、古いファイルが読み込まれている
   var AUDIO_EXT = /\.(wav|wave|mp3|m4a|aac|flac|ogg|oga|opus|aif|aiff|mp4|m4v|mov)$/i;
   var LOUD_TARGET = -11;       // オートゲインの目標（LUFS）
   var GAIN_ADJ_MAX = 12;       // 曲ごとの微調整の幅（±dB）
@@ -972,6 +972,66 @@
     return sel;
   }
 
+  // ---------- キッカケと「終了後」の連動（Ver. 0.10.4） ----------
+  // 次の曲のキッカケで、前の曲が終わった後の動きを決める。
+  //   音先 → 続けて再生 ／ MC → 続けて再生（MCの曲自体はループ）／ 板付き・曲フリ・その他・指定なし → 停止
+  // 連動するのはキッカケを選んだ時だけ。あとから手で「終了後」を変えればそちらが優先。
+  // 前の曲が MC でループしている時は、ループを残す（MCの途中で次へ進まないように）
+  function afterForNextCue(type) {
+    return type === 'otosaki' || type === 'mc' ? 'continue' : 'stop';
+  }
+
+  function neighborIds(t) {
+    var g = groupOf(t.id);
+    var ids = g ? g.trackIds : [];
+    var i = ids.indexOf(t.id);
+    return { prev: i > 0 ? tracks.get(ids[i - 1]) : null, next: i >= 0 && i < ids.length - 1 ? tracks.get(ids[i + 1]) : null };
+  }
+
+  function keepsLoop(t) { return t.cue && t.cue.type === 'mc' && t.afterAction === 'loop'; }
+
+  var AFTER_LABEL = { stop: '停止', continue: '続けて再生', loop: 'ループ' };
+
+  function linkCueToAfter(t, oldType, newType) {
+    if (locked || oldType === newType) return;
+    var n = neighborIds(t);
+    var notes = [];
+    if (n.prev && !keepsLoop(n.prev)) {
+      var want = afterForNextCue(newType);
+      if (n.prev.afterAction !== want) {
+        setAfterAction(n.prev, want);
+        notes.push('前の曲「' + n.prev.name + '」の終了後を「' + AFTER_LABEL[want] + '」に');
+      }
+    }
+    if (newType === 'mc' && t.afterAction !== 'loop') {
+      setAfterAction(t, 'loop');
+      notes.push('この曲を「ループ」に');
+    } else if (oldType === 'mc' && newType !== 'mc' && t.afterAction === 'loop') {
+      // MC をやめたら、この曲の終了後は次の曲のキッカケに合わせて戻す
+      var back = afterForNextCue(n.next && n.next.cue ? n.next.cue.type : '');
+      setAfterAction(t, back);
+      notes.push('この曲を「' + AFTER_LABEL[back] + '」に');
+    }
+    if (notes.length) toast('キッカケに合わせて、' + notes.join('、') + 'しました');
+  }
+
+  // グループの全曲の「終了後」を、キッカケに合わせてそろえ直す
+  function alignAfterToCues() {
+    if (locked) return;
+    var g = viewGroup();
+    if (!g) return;
+    var changed = 0;
+    g.trackIds.forEach(function (id, i) {
+      var t = tracks.get(id);
+      if (!t) return;
+      var next = tracks.get(g.trackIds[i + 1]);
+      var want = t.cue && t.cue.type === 'mc' ? 'loop' : afterForNextCue(next && next.cue ? next.cue.type : '');
+      if (t.afterAction !== want) { setAfterAction(t, want); changed++; }
+    });
+    afterChange();
+    toast(changed ? '「' + g.name + '」の' + changed + '曲の終了後を、キッカケに合わせました' : '「' + g.name + '」はすでにキッカケどおりです');
+  }
+
   function setAfterAction(t, v) {
     if (!t || locked) return;
     t.afterAction = v;
@@ -1043,7 +1103,9 @@
       row.appendChild(titleCell);
       var cueCell = cell('c-cue', null);
       cueCell.appendChild(rowSelect('row-cue k-' + (t.cue.type || 'none'), [['', '—'], ['otosaki', '音先'], ['itatsuki', '板付き'], ['furi', '曲フリ'], ['mc', 'MC'], ['other', 'その他']], t.cue.type || '', function (v) {
+        var old = t.cue.type || '';
         t.cue.type = v;
+        linkCueToAfter(t, old, v);
       }, 'きっかけ'));
       if (t.cue.text) cueCell.appendChild(cell('cue-memo', t.cue.text));
       cueCell.title = cueTitle(t);
@@ -1159,6 +1221,7 @@
     $('moveDownBtn').disabled = locked || index < 0 || index >= count - 1;
     $('removeBtn').disabled = locked || t.id === state.playingId;
     $('trimHeadAll').disabled = locked;
+    $('alignAfter').disabled = locked;
     renderGain(t);
     renderVocal(t, state);
     renderCueEditor(t);
@@ -1258,8 +1321,9 @@
     autoGainOn = !!on;
     saveSetting('autoGain', autoGainOn ? '1' : '0');
     if (current) applyGainToCurrent(tracks.get(current.trackId));
+    if (bgmNow && bgmNow.voice) bgmAudio.setTrim(bgmNow.voice, dbToGain(bgmGainDb(bgmTracks.get(bgmNow.trackId))));
     render();
-    toast(autoGainOn ? 'オートゲインを入れました（本編の音量をそろえます）' : 'オートゲインを切りました（元の音量で鳴らします）');
+    toast(autoGainOn ? 'オートゲインを入れました（本編と BGM の音量をそろえます）' : 'オートゲインを切りました（元の音量で鳴らします）');
   }
 
   function trimHeadAll() {
@@ -1839,6 +1903,7 @@
     });
     vocalUseGpu = loadSetting('vocalGpu', '1') !== '0';
     $('trimHeadAll').addEventListener('click', function (e) { e.currentTarget.blur(); trimHeadAll(); });
+    $('alignAfter').addEventListener('click', function (e) { e.currentTarget.blur(); alignAfterToCues(); });
     $('gainDown').addEventListener('click', function (e) { e.currentTarget.blur(); var t = selectedTrack(); if (t) setGainAdj(t, (t.gainAdj || 0) - 0.5); });
     $('gainUp').addEventListener('click', function (e) { e.currentTarget.blur(); var t = selectedTrack(); if (t) setGainAdj(t, (t.gainAdj || 0) + 0.5); });
     $('gainReset').addEventListener('click', function (e) { e.currentTarget.blur(); var t = selectedTrack(); if (t) setGainAdj(t, 0); });
@@ -3405,6 +3470,7 @@
       var tracksSaved = {};
       bgmTracks.forEach(function (t) {
         tracksSaved[t.id] = { name: t.name, fileName: t.fileName, duration: t.duration || 0 };
+        if (t.loud) tracksSaved[t.id].loud = { lufs: t.loud.lufs, peakDb: t.loud.peakDb };
       });
       store.putBank({
         id: 'bgm',
@@ -3430,9 +3496,10 @@
       });
       Object.keys(data.tracks || {}).forEach(function (id) {
         var t = data.tracks[id];
-        bgmTracks.set(id, { id: id, name: t.name, fileName: t.fileName, file: null, duration: t.duration || 0, status: 'stored' });
+        bgmTracks.set(id, { id: id, name: t.name, fileName: t.fileName, file: null, duration: t.duration || 0, status: 'stored', loud: t.loud || null });
       });
       bgmListId = bgmList(data.listId) ? data.listId : bgmLists[0].id;
+      measureBgmSoon();
     } else {
       bgmLists = defaultBgmLists();
       bgmListId = bgmLists[0].id;
@@ -3463,6 +3530,47 @@
     saveBgm();
     render();
     toast('「' + list.name + '」に' + files.length + '曲追加しました');
+    measureBgmSoon();
+  }
+
+  // ----- BGM のオートゲイン（Ver. 0.10.4） -----
+  // 本編と同じく、曲ごとのラウドネスを一度だけ測り、目標に合わせて曲全体のゲインだけを調整する
+  function bgmGainDb(t) {
+    if (!autoGainOn || !t || !t.loud || t.loud.lufs == null) return 0;
+    return Math.round((LOUD_TARGET - t.loud.lufs) * 10) / 10;
+  }
+
+  function measureBgmBuffer(t, buffer) {
+    if (t.measuring) return t.measuring;
+    t.measuring = audio.measureLoudness(buffer).then(function (r) {
+      t.loud = { lufs: isFinite(r.lufs) ? Math.round(r.lufs * 100) / 100 : null, peakDb: isFinite(r.peakDb) ? Math.round(r.peakDb * 100) / 100 : null };
+      t.measuring = null;
+      if (bgmNow && bgmNow.trackId === t.id && bgmNow.voice) bgmAudio.setTrim(bgmNow.voice, dbToGain(bgmGainDb(t)));
+      saveBgm();
+      renderBgm();
+    }, function () { t.measuring = null; });
+    return t.measuring;
+  }
+
+  // まだ測っていない BGM を、裏で1曲ずつ測る（読み込んだら手放す）
+  var bgmMeasureBusy = false;
+  function measureBgmSoon() {
+    if (bgmMeasureBusy) return;
+    var t = null;
+    bgmTracks.forEach(function (x) { if (!t && !x.loud && x.status !== 'error' && !x.measuring) t = x; });
+    if (!t) return;
+    bgmMeasureBusy = true;
+    var getting = t.file ? Promise.resolve(t.file) : (storeOk ? store.getFile(t.id) : Promise.resolve(null));
+    getting.then(function (file) {
+      if (!file) throw new Error('なし');
+      return audio.decodeFile(file);
+    }).then(function (buffer) {
+      if (!t.duration) { t.duration = buffer.duration; }
+      return measureBgmBuffer(t, buffer);
+    }).catch(function () { t.status = 'error'; }).then(function () {
+      bgmMeasureBusy = false;
+      setTimeout(measureBgmSoon, 50);
+    });
   }
 
   function loadBgmBuffer(id) {
@@ -3477,6 +3585,7 @@
     }).then(function (buffer) {
       bgmBuffers.set(id, buffer);
       if (!t.duration || Math.abs(t.duration - buffer.duration) > 0.5) { t.duration = buffer.duration; saveBgm(); }
+      if (!t.loud) measureBgmBuffer(t, buffer);
       t.status = 'ok';
       return buffer;
     }, function (err) {
@@ -3570,6 +3679,7 @@
       if (token !== bgmToken || bgmNow !== now) return; // 途中で止めた・切り替えた
       now.voice = bgmAudio.play(buffer, {
         output: getBgmBus(),
+        trim: dbToGain(bgmGainDb(bgmTracks.get(id))),
         offset: offset && offset < buffer.duration - 0.5 ? offset : 0,
         fadeIn: fadeIn ? BGM_FADE_IN : 0,
         onEnded: function (ended) {
@@ -3747,7 +3857,11 @@
       var isPlaying = !!(bgmNow && bgmNow.listId === list.id && bgmNow.trackId === id);
       row.className = 'bgm-row' + (id === bgmSelected ? ' is-selected' : '') + (isPlaying ? ' is-playing' : '') + (bt.status === 'error' ? ' is-error' : '');
       row.appendChild(cell('c-num', String(i + 1)));
-      row.appendChild(cell('c-title', bt.name));
+      var bTitle = cell('c-title', null);
+      bTitle.appendChild(cell('title-text', bt.name));
+      var bdb = bgmGainDb(bt);
+      if (bt.loud && Math.abs(bdb) >= 0.5) bTitle.appendChild(cell('gain-tag', fmtDb(bdb).replace(' ', '')));
+      row.appendChild(bTitle);
       row.appendChild(cell('c-state', isPlaying ? (bgmFading ? 'フェード中' : '再生中') : (bt.status === 'error' ? '読込不可' : '')));
       row.appendChild(cell('c-dur', bt.duration ? fmtShort(bt.duration) : '—'));
       row.addEventListener('click', function () { bgmSelected = id; renderBgm(); });

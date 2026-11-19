@@ -1132,3 +1132,8 @@ button { cursor: pointer; }
 .cd-list .cd-state.is-error { color: var(--danger); }
 .cd-list .cd-state.is-busy { color: var(--accent-hi); }
 .cd-progress { margin: 0 0 8px; font-size: 13px; font-weight: 700; color: var(--accent-hi); }
+
+/* キッカケに合わせて終了後をそろえる（Ver. 0.10.4） */
+.align-after { margin-top: 8px; width: 100%; }
+.bgm-row .c-title { display: flex; align-items: center; min-width: 0; }
+.bgm-row .c-title .title-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
