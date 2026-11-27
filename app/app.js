@@ -15,7 +15,7 @@
   var SEEK_SMALL = 10;          // ←→ キーと「10秒」ボタンで動かす秒数
   var SEEK_LARGE = 60;          // Shift+←→ と「1分」ボタンで動かす秒数
   var ASK_OUTPUTS = '__ask';    // 出力の選択肢「ほかの出力デバイスを表示…」
-  var APP_VERSION = '0.11.0'; // index.html の版と違えば、古いファイルが読み込まれている
+  var APP_VERSION = '0.11.1'; // index.html の版と違えば、古いファイルが読み込まれている
   var AUDIO_EXT = /\.(wav|wave|mp3|m4a|aac|flac|ogg|oga|opus|aif|aiff|mp4|m4v|mov)$/i;
   var MARKER_DELAY_MAX = 10;    // マーカーから次の曲までの最大秒数
   var LOUD_TARGET = -11;       // オートゲインの目標（LUFS）

@@ -165,6 +165,8 @@ function closeVideoWindow() {
   videoWindow = null;
 }
 
+const IS_MAC = process.platform === 'darwin';
+
 function openVideoWindow(target) {
   closeVideoWindow();
   const preview = target === 'preview';
@@ -179,23 +181,47 @@ function openVideoWindow(target) {
     width: preview ? 640 : b.width, height: preview ? 360 : b.height,
     frame: preview, resizable: preview, movable: true,
     backgroundColor: '#000000', show: false, title: 'ポン出し 映像出力',
-    skipTaskbar: !preview, focusable: preview, hasShadow: preview,
+    // Mac は外部モニターでもメニューバーが残るので、その画面だけのフルスクリーンにする（フォーカスが要る）
+    skipTaskbar: !preview, focusable: preview || IS_MAC, hasShadow: preview,
+    fullscreenable: !preview && IS_MAC,
     autoHideMenuBar: true,
     webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, backgroundThrottling: false }
   });
   if (!preview) {
     videoWindow.setBounds(b);
-    videoWindow.setAlwaysOnTop(true, 'screen-saver'); // メニューバー・タスクバーより上に
-    videoWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+    if (!IS_MAC) {
+      videoWindow.setAlwaysOnTop(true, 'screen-saver'); // タスクバーより上に
+      videoWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+    }
   }
   videoWindow.setMenu(null);
   videoWindow.loadFile(path.join(__dirname, 'app', 'video.html'), { hash: preview ? 'preview' : '' });
-  videoWindow.once('ready-to-show', () => {
-    if (!videoWindow) return;
-    videoWindow.showInactive(); // 本体のウィンドウからフォーカスを奪わない（Space で GO できるように）
-    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.focus();
-  });
   const win = videoWindow;
+  const backToMain = () => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.focus(); };
+  videoWindow.once('ready-to-show', () => {
+    if (videoWindow !== win) return;
+    if (IS_MAC && !preview) {
+      // Mac：外部モニターの画面だけをフルスクリーンにして、メニューバーを消す。
+      // フルスクリーンになったら本体のウィンドウにフォーカスを戻す（Space で GO できるように）
+      win.show();
+      win.once('enter-full-screen', () => {
+        win.setFocusable(false);
+        setTimeout(backToMain, 100);
+      });
+      win.setFullScreen(true);
+      // フルスクリーンにならなかった時の予備：簡易フルスクリーン（メニューバーを隠す）
+      setTimeout(() => {
+        if (videoWindow === win && !win.isFullScreen()) {
+          win.setSimpleFullScreen(true);
+          win.setBounds(b);
+          backToMain();
+        }
+      }, 2500);
+      return;
+    }
+    win.showInactive(); // 本体のウィンドウからフォーカスを奪わない（Space で GO できるように）
+    backToMain();
+  });
   videoWindow.on('closed', () => {
     if (videoWindow === win) videoWindow = null;
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('video-closed');
