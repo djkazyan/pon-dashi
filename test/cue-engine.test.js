@@ -347,3 +347,26 @@ test('保存から戻す時の「済」の印', () => {
   assert.equal(e.markPlayed('X'), false);
   assert.equal(e.getState(0).played.M1, true);
 });
+
+test('マーカー：今の曲を鳴らしたまま、スタンバイ曲を出す（2回押し・連打ガードに関係なく）', () => {
+  const e = setup({ goMode: 'double' });
+  e.go(0); e.go(100); // M1 を出す
+  const r = e.markerGo('M1', 500); // ガード中でも出る
+  assert.deepEqual(r, { type: 'play', trackId: 'M2', cutTrackId: 'M1', cause: 'marker' });
+  assert.equal(e.getState(500).playingId, 'M2');
+  assert.equal(e.getState(500).standbyId, 'M3');
+  // 前の曲の「終わった」知らせが後から来ても、何も起きない
+  assert.equal(e.trackEnded('M1', 4000).type, 'ignored');
+  assert.equal(e.getState(4000).playingId, 'M2');
+});
+
+test('マーカー：再生中でない曲・フェード中・スタンバイなしでは何もしない', () => {
+  const e = setup({ goMode: 'single' }, 2);
+  e.go(0);
+  assert.equal(e.markerGo('M2', 100).type, 'ignored');
+  e.fade();
+  assert.equal(e.markerGo('M1', 200).reason, 'fading');
+  const e2 = setup({ goMode: 'single' }, 1);
+  e2.go(0);
+  assert.equal(e2.markerGo('M1', 100).reason, 'no-standby');
+});

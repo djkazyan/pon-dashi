@@ -208,6 +208,31 @@ ipcMain.handle('video-open', (event, target) => openVideoWindow(target));
 ipcMain.handle('video-close', () => { closeVideoWindow(); return true; });
 
 // ---------- 画面（ディスプレイ）まわり ----------
+// ---- ロゴのフォルダ（映像出力のグループロゴ） ----
+const LOGO_EXT = /\.(png|jpe?g|gif|webp|bmp)$/i;
+ipcMain.handle('logo-folder-pick', async () => {
+  const r = await dialog.showOpenDialog(mainWindow, { title: 'ロゴの画像が入ったフォルダを選ぶ', properties: ['openDirectory'] });
+  return r.canceled || !r.filePaths.length ? null : r.filePaths[0];
+});
+ipcMain.handle('logo-folder-list', async (event, dir) => {
+  const fsp = require('fs').promises;
+  try {
+    const names = await fsp.readdir(String(dir));
+    return names.filter((n) => LOGO_EXT.test(n) && !n.startsWith('.')).sort((a, b) => a.localeCompare(b, 'ja', { numeric: true }));
+  } catch (e) {
+    return null; // フォルダがない（USB を抜いた など）
+  }
+});
+ipcMain.handle('logo-read', async (event, dir, name) => {
+  const pathMod = require('path');
+  const full = pathMod.resolve(String(dir), String(name));
+  if (pathMod.dirname(full) !== pathMod.resolve(String(dir)) || !LOGO_EXT.test(full)) throw new Error('読めないファイルです');
+  const stat = await require('fs').promises.stat(full);
+  if (stat.size > 30 * 1024 * 1024) throw new Error('画像が大きすぎます');
+  const buf = await require('fs').promises.readFile(full);
+  return new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
+});
+
 // ---- 音楽CDから取り込む（Mac のみ） ----
 // macOS は音楽CDを入れると /Volumes/<CD名>/ に「1 曲名.aiff」のようなファイルとして見せる。
 // それを読んで画面側に渡す（画面側で AIFF を読み、アプリの中にコピーする）。

@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ポン出し</title>
-<link rel="stylesheet" href="style.css?v=0.10.4">
+<link rel="stylesheet" href="style.css?v=0.11.0">
 </head>
 <body>
 <div class="app" id="app">
@@ -12,9 +12,11 @@
   <header class="topbar">
     <div class="brand">
       <span class="brand-name">ポン出し</span>
-      <span class="brand-ver" id="appVersion" data-version="0.10.4">Ver. 0.10.4</span>
+      <span class="brand-ver" id="appVersion" data-version="0.11.0">Ver. 0.11.0</span>
       <button type="button" class="btn btn-small update-btn" id="updateBtn" hidden>新しい版があります</button>
       <input type="text" class="show-name" id="showName" aria-label="イベント名" maxlength="60" spellcheck="false">
+      <button type="button" class="logo-btn" id="eventLogoBtn" title="イベントロゴ（映像出力で使う画像）を選ぶ" hidden><img id="eventLogoBtnImg" alt=""><span id="eventLogoBtnText">ロゴ</span></button>
+      <input type="file" id="eventLogoInput" accept="image/*" hidden>
       <span class="save-status" id="saveStatus">保存済み</span>
       <button type="button" class="btn btn-small" id="showsBtn">イベント一覧</button>
     </div>
@@ -36,6 +38,12 @@
         </select>
       </div>
       <button type="button" class="btn video-btn" id="videoBtn" hidden><span id="videoBtnLabel">映像出力</span></button>
+      <div class="seg video-mode" id="videoModeBox" role="group" aria-label="映像出力に出すもの" hidden>
+        <button type="button" class="seg-btn" data-vmode="auto" aria-pressed="true" title="映像付きの曲は映像、ほかはその曲のグループロゴ、止まっている時は黒">自動</button>
+        <button type="button" class="seg-btn" data-vmode="black" aria-pressed="false">黒</button>
+        <button type="button" class="seg-btn" data-vmode="event" aria-pressed="false">イベント</button>
+        <button type="button" class="seg-btn" data-vmode="group" aria-pressed="false" title="表示中のグループのロゴ">グループ</button>
+      </div>
       <button type="button" class="btn" id="addFilesBtn">曲を追加</button>
       <button type="button" class="btn" id="cdBtn" title="音楽CDから曲を取り込む（Mac）" hidden>CD取り込み</button>
       <button type="button" class="btn" id="deleteTrackBtn" title="選んでいる曲を削除（Delete キーでも）">曲を削除</button>
@@ -136,6 +144,18 @@
           <button type="button" class="btn btn-small" id="setInNow">今の位置を開始に</button>
           <button type="button" class="btn btn-small" id="setOutNow">今の位置を終了に</button>
           <button type="button" class="btn btn-small" id="rangeReset">範囲を戻す</button>
+        </div>
+        <div class="marker-box" id="markerBox">
+          <div class="marker-head">マーカー<span class="marker-help">ここに来たら、指定の秒数後に次の曲を再生（今の曲は最後まで鳴らす）</span></div>
+          <div class="range-row">
+            <label class="range-field"><span>位置</span><input type="text" class="range-input" id="markerTime" spellcheck="false" inputmode="decimal" placeholder="なし"></label>
+            <label class="range-field"><span>次の曲まで</span><select class="select select-small" id="markerDelay" aria-label="マーカーから次の曲までの秒数"></select></label>
+          </div>
+          <div class="detail-row">
+            <button type="button" class="btn btn-small" id="markerNow">今の位置をマーカーに</button>
+            <button type="button" class="btn btn-small" id="markerClear">マーカーを外す</button>
+          </div>
+          <p class="marker-note" id="markerNote" hidden></p>
         </div>
         </div>
       </div>
@@ -323,12 +343,28 @@
         <h2 class="modal-title" id="videoTitle">映像出力</h2>
         <button type="button" class="btn btn-small" id="videoClose">閉じる</button>
       </div>
-      <p class="modal-note">映像付きの曲（MP4 など）の映像を、外部モニターに出します。音はいつもどおり「出力」から出ます。</p>
+      <p class="modal-note">映像付きの曲（MP4 など）の映像やロゴを、外部モニターに出します。音はいつもどおり「出力」から出ます。切り替えはすべて2秒のフェードです。</p>
       <label class="video-field"><span>出力先</span><select id="videoTarget" class="select"></select></label>
-      <div class="video-field"><span>何もない時</span><span class="video-still-name" id="videoStillName">なし（黒）</span>
-        <button type="button" class="btn btn-small" id="videoStillBtn">画像を選ぶ</button>
-        <button type="button" class="btn btn-small" id="videoStillClear">外す</button>
-        <input type="file" id="videoStillInput" accept="image/*" hidden></div>
+      <div class="logo-sec">
+        <div class="logo-title">イベントロゴ<span class="logo-help">上の「自動／黒／イベント／グループ」の「イベント」で出します</span></div>
+        <div class="logo-row">
+          <span class="logo-thumb" id="eventLogoThumb"></span>
+          <span class="logo-name" id="eventLogoName">なし</span>
+          <button type="button" class="btn btn-small" id="eventLogoPick">画像を選ぶ</button>
+          <button type="button" class="btn btn-small" id="eventLogoClear">外す</button>
+        </div>
+        <div class="logo-title">グループのロゴ<span class="logo-help">映像なしの曲を流している間に出します。グループを選んでから、下の画像をクリック</span></div>
+        <ul class="logo-groups" id="logoGroups"></ul>
+        <input type="file" id="groupLogoInput" accept="image/*" hidden>
+        <div class="logo-folder">
+          <span class="logo-folder-label">ロゴのフォルダ</span>
+          <span class="logo-folder-path" id="logoFolderPath">未指定</span>
+          <button type="button" class="btn btn-small" id="logoFolderPick">フォルダを選ぶ</button>
+          <button type="button" class="btn btn-small" id="logoFolderReload">読み直す</button>
+        </div>
+        <div class="logo-grid" id="logoGrid"></div>
+        <button type="button" class="btn btn-small" id="logoAutoMatch">ファイル名がグループ名と同じ画像を合わせる</button>
+      </div>
       <label class="video-field"><span>映像を早める</span><input type="number" id="videoDelay" class="video-delay" step="10" min="-1000" max="1000"><span class="video-unit">ミリ秒</span></label>
       <p class="modal-note">モニターやプロジェクターで映像が音より遅れて見える時は、プラスにして合わせます（例：80）。</p>
       <p class="video-state" id="videoState"></p>
@@ -416,10 +452,10 @@
   </div>
 </div>
 
-<script src="cue-engine.js?v=0.10.4"></script>
-<script src="store.js?v=0.10.4"></script>
-<script src="audio-engine.js?v=0.10.4"></script>
-<script src="backup.js?v=0.10.4"></script>
-<script src="app.js?v=0.10.4"></script>
+<script src="cue-engine.js?v=0.11.0"></script>
+<script src="store.js?v=0.11.0"></script>
+<script src="audio-engine.js?v=0.11.0"></script>
+<script src="backup.js?v=0.11.0"></script>
+<script src="app.js?v=0.11.0"></script>
 </body>
 </html>

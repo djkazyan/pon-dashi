@@ -1,33 +1,45 @@
 /*
  * ポン出し — 映像出力ウィンドウ
- * 本体のウィンドウから BroadcastChannel で指示を受けて、映像付きの曲の映像だけを出す（音は出さない）。
- * 音は本体が鳴らしているので、本体から届く再生位置に映像を合わせ続ける。
- *   play   { key, pos, sentAt }  … この曲の映像を pos 秒から出す
- *   sync   { key, pos, sentAt }  … 再生位置のお知らせ（ずれていたら直す）
- *   fade   { seconds }           … だんだん暗くして止める
- *   stop   {}                    … すぐ止めて、静止画（なければ黒）に戻す
+ * 本体のウィンドウから BroadcastChannel で指示を受けて、外部モニターに「映像・ロゴ・黒」を出す（音は出さない）。
+ * 切り替えはすべて2秒のフェード（Ver. 0.11.0）。
+ *   scene { mode: 'video' | 'image' | 'black', key, pos, sentAt, image, fade }
+ *          … video：曲 key の映像を pos 秒から ／ image：画像 image（保存領域のキー）を ／ black：黒
+ *   sync   { key, pos, sentAt }  … 映像の再生位置のお知らせ（ずれていたら直す）
  *   prepare{ key }               … 次に出しそうな曲の映像を先に読み込んでおく
+ *   images { key }               … 画像が差し替わった（読み直す）
  *   settings { delayMs }         … 映像を早める量
- *   still  {}                    … 静止画が変わった
  */
 (function () {
   'use strict';
 
   var ch = new BroadcastChannel('pon-video');
   var video = document.getElementById('video');
-  var still = document.getElementById('still');
+  var imgs = [document.getElementById('imgA'), document.getElementById('imgB')];
   var store = window.PonStore;
   if (/preview/.test(location.hash)) document.body.classList.add('is-preview');
 
+  var FADE = 2;           // 切り替えの秒数
   var loadedKey = null;   // video に読み込んである曲
   var loadingKey = null;
   var loadPromise = null;
-  var playingKey = null;  // いま映している曲
+  var playingKey = null;  // いま映している（映そうとしている）曲
   var delay = 0;          // 映像を早める秒数（モニターの遅れの分）
-  var fadeTimer = null;
-  var urls = {};
+  var urls = {};          // 曲の映像
+  var imageUrls = {};     // 画像（キー → URL）
   var seekLag = 0.15;     // 飛んでから映像が出るまでにかかる時間（実測で更新）
   var seeking = false;
+  var token = 0;          // 最後に受けた場面の番号（読み込み待ちの間に場面が変わったら捨てる）
+  var scene = { mode: 'black' };
+  var pauseTimer = null;
+
+  function setFade(seconds) {
+    FADE = seconds == null ? 2 : Math.max(0, seconds);
+    [video, imgs[0], imgs[1]].forEach(function (el) { el.style.transitionDuration = FADE + 's'; });
+  }
+  setFade(2);
+
+  function layerOn(el, on) { el.classList.toggle('is-on', !!on); }
+  function isOn(el) { return el.classList.contains('is-on'); }
 
   // 指定の位置へ飛ぶ。飛ぶのにかかる時間の分だけ先へ飛んでおく
   function jump(t) {
@@ -76,34 +88,88 @@
     return loadPromise;
   }
 
+  function imageUrl(key) {
+    if (imageUrls[key]) return Promise.resolve(imageUrls[key]);
+    return store.getFile(key).then(function (file) {
+      if (!file) return null;
+      imageUrls[key] = URL.createObjectURL(file);
+      return imageUrls[key];
+    }, function () { return null; });
+  }
+
   function target(msg) {
     return msg.pos + Math.max(0, (Date.now() - msg.sentAt) / 1000) + delay;
   }
 
-  function showVideo(on) {
-    clearTimeout(fadeTimer);
-    video.style.transition = 'none';
-    video.classList.toggle('is-on', on);
-    still.style.display = on || !still.getAttribute('src') ? 'none' : 'block';
+  // 映像を消す（フェードが終わったら止める）
+  function hideVideo() {
+    if (!isOn(video)) { if (!playingKey) video.pause(); return; }
+    layerOn(video, false);
+    clearTimeout(pauseTimer);
+    pauseTimer = setTimeout(function () { if (!isOn(video)) video.pause(); }, FADE * 1000 + 50);
   }
 
-  function play(msg) {
-    playingKey = msg.key;
-    load(msg.key).then(function (ok) {
-      if (playingKey !== msg.key) return;
-      if (!ok || !video.videoWidth) { stop(); return; } // 映像が入っていない・読めない形式
-      var t = target(msg);
-      if (t >= video.duration) { stop(); return; }
-      jump(t);
-      showVideo(true);
-      var p = video.play();
-      if (p && p.catch) p.catch(function () {});
+  function hideImages(except) {
+    imgs.forEach(function (el) { if (el !== except) layerOn(el, false); });
+  }
+
+  function toBlack(my) {
+    playingKey = null;
+    hideVideo();
+    hideImages(null);
+  }
+
+  function toImage(my, key) {
+    playingKey = null;
+    var showing = imgs.filter(function (el) { return isOn(el) && el.dataset.key === key; })[0];
+    if (showing) { hideImages(showing); hideVideo(); return; }
+    imageUrl(key).then(function (url) {
+      if (my !== token) return;
+      if (!url) { toBlack(my); return; }
+      // 見えていない方の画像の層に読み込んで、フェードで入れ替える
+      var el = isOn(imgs[0]) ? imgs[1] : imgs[0];
+      el.onload = function () {
+        el.onload = null;
+        if (my !== token) return;
+        el.dataset.key = key;
+        layerOn(el, true);
+        hideImages(el);
+        hideVideo();
+      };
+      el.onerror = function () { el.onerror = null; if (my === token) toBlack(my); };
+      el.src = url;
     });
   }
 
+  function toVideo(my, msg) {
+    playingKey = msg.key;
+    load(msg.key).then(function (ok) {
+      if (my !== token || playingKey !== msg.key) return;
+      if (!ok || !video.videoWidth) { toBlack(my); return; } // 映像が入っていない・読めない形式
+      var t = target(msg);
+      if (t >= video.duration) { toBlack(my); return; }
+      clearTimeout(pauseTimer);
+      jump(t);
+      var p = video.play();
+      if (p && p.catch) p.catch(function () {});
+      layerOn(video, true);
+      hideImages(null);
+    });
+  }
+
+  function applyScene(msg) {
+    var my = ++token;
+    setFade(msg.fade);
+    scene = msg;
+    if (msg.mode === 'video' && msg.key) toVideo(my, msg);
+    else if (msg.mode === 'image' && msg.image) toImage(my, msg.image);
+    else toBlack(my);
+  }
+
   function sync(msg) {
-    if (msg.key !== playingKey || loadedKey !== msg.key || video.paused) {
-      if (msg.key !== playingKey || (loadedKey === msg.key && video.paused)) play(msg);
+    if (scene.mode !== 'video' || msg.key !== playingKey) return;
+    if (loadedKey !== msg.key || video.paused) {
+      if (loadedKey === msg.key && video.paused && !video.ended) applyScene(Object.assign({}, scene, { pos: msg.pos, sentAt: msg.sentAt }));
       return;
     }
     if (seeking) return;
@@ -118,47 +184,30 @@
     }
   }
 
-  function stop() {
-    playingKey = null;
-    video.pause();
-    showVideo(false);
-  }
-
-  function fade(seconds) {
-    if (!playingKey) return;
-    clearTimeout(fadeTimer);
-    video.style.transition = 'opacity ' + seconds + 's linear';
-    video.classList.remove('is-on');
-    fadeTimer = setTimeout(stop, seconds * 1000);
-  }
-
-  function loadStill() {
-    store.getFile('video-still').then(function (file) {
-      if (still.dataset.url) URL.revokeObjectURL(still.dataset.url);
-      if (file) {
-        var u = URL.createObjectURL(file);
-        still.dataset.url = u;
-        still.setAttribute('src', u);
-      } else {
-        still.removeAttribute('src');
-        delete still.dataset.url;
-      }
-      if (!playingKey) showVideo(false);
-    }, function () {});
-  }
-
   ch.onmessage = function (e) {
     var m = e.data || {};
-    if (m.type === 'play') play(m);
+    if (m.type === 'scene') applyScene(m);
     else if (m.type === 'sync') sync(m);
-    else if (m.type === 'stop') stop();
-    else if (m.type === 'fade') fade(m.seconds || 3);
-    else if (m.type === 'prepare') { if (!playingKey && m.key) load(m.key); }
+    else if (m.type === 'prepare') { if (!playingKey && !isOn(video) && m.key) load(m.key); } // フェード中の映像は入れ替えない
     else if (m.type === 'settings') setDelay(m.delayMs);
-    else if (m.type === 'still') loadStill();
+    else if (m.type === 'images') {
+      // 画像が差し替わった：覚えている URL を捨てる。いま出している画像なら出し直す
+      var k = m.key;
+      if (imageUrls[k]) { URL.revokeObjectURL(imageUrls[k]); delete imageUrls[k]; }
+      imgs.forEach(function (el) { if (el.dataset.key === k) el.dataset.key = ''; });
+      if (scene.mode === 'image' && scene.image === k) applyScene(scene);
+    }
   };
 
-  window.__ponVideo = { video: video, state: function () { return { playingKey: playingKey, loadedKey: loadedKey, delay: delay, on: video.classList.contains('is-on') }; } };
-  loadStill();
+  window.__ponVideo = {
+    video: video,
+    state: function () {
+      var img = imgs.filter(isOn)[0];
+      return {
+        scene: scene.mode, playingKey: playingKey, loadedKey: loadedKey, delay: delay,
+        on: isOn(video), image: img ? img.dataset.key : null, fade: FADE
+      };
+    }
+  };
   ch.postMessage({ type: 'hello' }); // 開いた時に、本体からいまの状態を送ってもらう
 })();

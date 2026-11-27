@@ -1137,3 +1137,44 @@ button { cursor: pointer; }
 .align-after { margin-top: 8px; width: 100%; }
 .bgm-row .c-title { display: flex; align-items: center; min-width: 0; }
 .bgm-row .c-title .title-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+
+/* マーカー（Ver. 0.11.0） */
+.marker-box { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
+.marker-head { font-size: 12px; font-weight: 700; color: var(--marker, #ffb224); margin-bottom: 6px; }
+.marker-help { display: block; font-weight: 400; color: var(--muted); font-size: 11px; margin-top: 2px; }
+.marker-note { margin: 4px 0 0; font-size: 12px; color: var(--caution); }
+#markerTime.is-set { border-color: #ffb224; color: #ffd27a; }
+.marker-tag { flex: none; font-size: 11px; color: #ffb224; margin-left: 6px; }
+.now-marker { color: #ffb224; font-weight: 700; }
+
+/* ロゴ（Ver. 0.11.0） */
+.logo-btn { display: inline-flex; align-items: center; gap: 4px; height: 26px; padding: 0 6px; border: 1px dashed var(--line); border-radius: 6px; background: transparent; color: var(--muted); font-size: 12px; cursor: pointer; }
+.logo-btn:hover { border-color: var(--accent-hi); color: var(--text); }
+.logo-btn img { height: 20px; max-width: 44px; object-fit: contain; display: none; }
+.logo-btn.has-logo { border-style: solid; }
+.logo-btn.has-logo img { display: block; }
+.logo-btn.has-logo span { display: none; }
+.video-mode .seg-btn { padding: 0 8px; }
+.video-mode .seg-btn[data-vmode="auto"][aria-pressed="true"] { background: var(--accent); }
+.video-mode.is-manual { box-shadow: 0 0 0 2px var(--caution); border-radius: 7px; }
+.logo-sec { margin: 6px 0 10px; }
+.logo-title { font-size: 12px; font-weight: 700; margin: 10px 0 4px; }
+.logo-help { font-weight: 400; color: var(--muted); margin-left: 8px; font-size: 11px; }
+.logo-row { display: flex; align-items: center; gap: 8px; }
+.logo-thumb { flex: none; width: 56px; height: 32px; border: 1px solid var(--line); border-radius: 4px; background: #000 center / contain no-repeat; }
+.logo-name { flex: 1; min-width: 0; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
+.logo-groups { list-style: none; margin: 0; padding: 4px; max-height: 190px; overflow: auto; background: var(--raised); border: 1px solid var(--line); border-radius: 8px; }
+.logo-groups li { display: flex; align-items: center; gap: 8px; padding: 4px 6px; border-radius: 5px; cursor: pointer; font-size: 13px; }
+.logo-groups li:hover { background: rgba(255, 255, 255, .04); }
+.logo-groups li.is-active { background: rgba(42, 106, 232, .25); outline: 1px solid var(--accent-hi); }
+.logo-groups .lg-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.logo-folder { display: flex; align-items: center; gap: 6px; margin: 8px 0 6px; font-size: 12px; }
+.logo-folder-label { flex: none; font-weight: 700; }
+.logo-folder-path { flex: 1; min-width: 0; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.logo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(72px, 1fr)); gap: 6px; max-height: 210px; overflow: auto; margin-bottom: 6px; }
+.logo-grid:empty { display: none; }
+.logo-cell { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 4px; border: 1px solid var(--line); border-radius: 6px; background: var(--raised); cursor: pointer; font-size: 10px; color: var(--muted); }
+.logo-cell:hover { border-color: var(--accent-hi); color: var(--text); }
+.logo-cell img { width: 64px; height: 36px; object-fit: contain; background: #000; }
+.logo-cell span { max-width: 68px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#videoBackdrop .modal { max-height: 92vh; overflow-y: auto; }

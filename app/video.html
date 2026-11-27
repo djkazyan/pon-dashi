@@ -6,21 +6,23 @@
 <style>
   html, body { margin: 0; height: 100%; background: #000; overflow: hidden; cursor: none; }
   #stage { position: fixed; inset: 0; background: #000; }
-  #still, #video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #000; }
-  #still { display: none; }
-  #video { opacity: 0; }
-  #video.is-on { opacity: 1; }
+  .layer { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; opacity: 0;
+    transition-property: opacity; transition-duration: 2s; transition-timing-function: linear; }
+  .layer.is-on { opacity: 1; }
+  #video { z-index: 2; background: transparent; }
+  img.layer { z-index: 1; }
   #info { position: fixed; left: 16px; bottom: 12px; font: 12px sans-serif; color: rgba(255,255,255,.35); display: none; }
   body.is-preview #info { display: block; }
 </style>
 </head>
 <body>
 <div id="stage">
-  <img id="still" alt="">
-  <video id="video" muted playsinline preload="auto"></video>
+  <img id="imgA" class="layer" alt="">
+  <img id="imgB" class="layer" alt="">
+  <video id="video" class="layer" muted playsinline preload="auto"></video>
 </div>
 <div id="info">ポン出し 映像出力（確認用の小さいウィンドウ）</div>
-<script src="store.js?v=0.10.4"></script>
-<script src="video.js?v=0.10.4"></script>
+<script src="store.js?v=0.11.0"></script>
+<script src="video.js?v=0.11.0"></script>
 </body>
 </html>

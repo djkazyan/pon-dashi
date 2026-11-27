@@ -28,6 +28,12 @@ contextBridge.exposeInMainWorld('ponNative', {
     close() { return ipcRenderer.invoke('video-close'); },
     onClosed(fn) { ipcRenderer.on('video-closed', () => fn()); }
   },
+  // ロゴの画像が入ったフォルダ
+  logos: {
+    pickFolder() { return ipcRenderer.invoke('logo-folder-pick'); },
+    list(dir) { return ipcRenderer.invoke('logo-folder-list', dir); },
+    read(dir, name) { return ipcRenderer.invoke('logo-read', dir, name); }
+  },
   // 音楽CDから取り込む（Mac のみ）
   cd: {
     supported() { return ipcRenderer.invoke('cd-supported'); },

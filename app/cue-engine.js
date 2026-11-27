@@ -252,6 +252,16 @@
         return { type: 'ended', trackId: id };
       },
 
+      // マーカー：再生中の曲 id のマーカーに来た時に呼ぶ。今の曲は鳴らしたまま、スタンバイ曲を出す。
+      // 押し方（2回押し）・連打ガードは関係ない（人の操作ではないため）
+      markerGo: function (id, now) {
+        if (id !== playingId) return ignored('stale');
+        if (fading) return ignored('fading');
+        if (standbyId === null) return ignored('no-standby');
+        if (!tracks[standbyId].ready) return ignored('not-ready', { trackId: standbyId });
+        return fire(now, 'marker');
+      },
+
       disarm: function () {
         var was = armed;
         armed = false;

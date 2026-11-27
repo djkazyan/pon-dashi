@@ -15,8 +15,9 @@
   var SEEK_SMALL = 10;          // ←→ キーと「10秒」ボタンで動かす秒数
   var SEEK_LARGE = 60;          // Shift+←→ と「1分」ボタンで動かす秒数
   var ASK_OUTPUTS = '__ask';    // 出力の選択肢「ほかの出力デバイスを表示…」
-  var APP_VERSION = '0.10.4'; // index.html の版と違えば、古いファイルが読み込まれている
+  var APP_VERSION = '0.11.0'; // index.html の版と違えば、古いファイルが読み込まれている
   var AUDIO_EXT = /\.(wav|wave|mp3|m4a|aac|flac|ogg|oga|opus|aif|aiff|mp4|m4v|mov)$/i;
+  var MARKER_DELAY_MAX = 10;    // マーカーから次の曲までの最大秒数
   var LOUD_TARGET = -11;       // オートゲインの目標（LUFS）
   var GAIN_ADJ_MAX = 12;       // 曲ごとの微調整の幅（±dB）
   var VIDEO_EXT = /\.(mp4|m4v|mov)$/i; // 動画ファイルは音声だけ取り出して鳴らす
@@ -279,6 +280,76 @@
     return true;
   }
 
+  // ---------- マーカー（Ver. 0.11.0） ----------
+  // 曲の中に印を打ち、そこから指定の秒数後に次の曲（スタンバイ曲）を出す。今の曲は止めずに最後まで鳴らす。
+  // ループの曲では使わない。手で GO・停止・フェードしたら、その曲のマーカーは取り消し。
+  function markerUsable(t) { return !!t && t.marker != null && t.afterAction !== 'loop'; }
+
+  // 次の曲を出す位置（曲の中の秒）。終了位置より後なら、終了の少し前に出す
+  function markerFireAt(t) {
+    if (!markerUsable(t)) return null;
+    var at = t.marker + (t.markerDelay || 0);
+    var r = rangeOf(t);
+    return Math.min(at, Math.max(r.start, r.end - 0.05));
+  }
+
+  function checkMarker() {
+    if (!current || current.markerDone) return;
+    var t = tracks.get(current.trackId);
+    var at = markerFireAt(t);
+    if (at == null || !current.voice || current.voice.fading) return;
+    var pos = audio.position(current.voice);
+    if (pos < at - 0.005) return;
+    current.markerDone = true;
+    var r = engine.markerGo(t.id, now());
+    if (r.type === 'play') {
+      startTrack(r);
+      afterChange();
+    } else if (r.reason === 'not-ready') {
+      toast('マーカー：次の曲を読み込み中のため、出せませんでした');
+    } else if (r.reason === 'no-standby') {
+      toast('マーカー：次の曲がないため、何もしませんでした');
+    }
+  }
+  setInterval(checkMarker, 20);
+
+  function setMarker(t, sec) {
+    if (!t || locked) return;
+    if (sec == null) { t.marker = null; afterChange(); return; }
+    if (!t.info) return;
+    var r = rangeOf(t);
+    if (sec < r.start || sec > r.end) { toast('マーカーは再生範囲の中に打ってください'); render(); return; }
+    t.marker = Math.round(sec * 10) / 10;
+    // 再生中の曲に打ち直したら、まだ来ていない位置なら効くようにする
+    if (current && current.trackId === t.id) current.markerDone = audio.position(current.voice) >= markerFireAt(t);
+    afterChange();
+  }
+
+  function renderMarker(t) {
+    var hasInfo = !!t.info;
+    var loop = t.afterAction === 'loop';
+    var input = $('markerTime');
+    if (document.activeElement !== input) input.value = t.marker != null ? fmtPrecise(t.marker) : '';
+    input.disabled = locked || !hasInfo || loop;
+    input.classList.toggle('is-set', t.marker != null);
+    var sel = $('markerDelay');
+    if (!sel.options.length) for (var d = 0; d <= MARKER_DELAY_MAX; d += 0.5) addOption(sel, String(d), (d % 1 ? d.toFixed(1) : String(d)) + '秒後');
+    sel.value = String(t.markerDelay || 0);
+    sel.disabled = locked || loop || t.marker == null;
+    var isCurrent = !!(current && current.trackId === t.id);
+    $('markerNow').disabled = locked || !isCurrent || loop;
+    $('markerClear').disabled = locked || t.marker == null;
+    var note = $('markerNote');
+    var msg = '';
+    if (loop && t.marker != null) msg = 'ループの曲なので、マーカーは使いません';
+    else if (t.marker != null && hasInfo) {
+      var r = rangeOf(t);
+      if (t.marker + (t.markerDelay || 0) > r.end) msg = '終了位置を過ぎるので、終了の直前に次の曲を出します';
+    }
+    note.textContent = msg;
+    note.hidden = !msg;
+  }
+
   function fmtPrecise(sec) {
     var s = Math.max(0, sec);
     var m = Math.floor(s / 60);
@@ -389,7 +460,10 @@
       loud: data.loud && typeof data.loud === 'object' ? { lufs: data.loud.lufs == null ? null : Number(data.loud.lufs), peakDb: data.loud.peakDb == null ? null : Number(data.loud.peakDb) } : null,
       gainAdj: isFinite(Number(data.gainAdj)) ? Math.max(-GAIN_ADJ_MAX, Math.min(GAIN_ADJ_MAX, Number(data.gainAdj))) : 0,
       // オートキュー：'pending' なら、調べ終わった時に頭の無音を詰める（新しく取り込んだ曲）
-      autoCue: data.autoCue === 'pending' ? 'pending' : 'done'
+      autoCue: data.autoCue === 'pending' ? 'pending' : 'done',
+      // マーカー：この位置（秒）から markerDelay 秒後に、今の曲を鳴らしたまま次の曲を出す
+      marker: isFinite(Number(data.marker)) && data.marker != null ? Math.max(0, Number(data.marker)) : null,
+      markerDelay: isFinite(Number(data.markerDelay)) ? Math.max(0, Math.min(MARKER_DELAY_MAX, Number(data.markerDelay))) : 0
     });
     g.trackIds.push(id);
     engine.addTrack({ id: id, ready: false });
@@ -634,12 +708,18 @@
 
   function startTrack(result) {
     if (bgmAutoFade && bgmNow && !bgmFading) bgmPause(BGM_FADE_SECONDS); // 本編のGOでBGMをフェードアウト（一時停止。再開で続きから）
-    if (current) releasePrevious(current.voice); // 再生中の曲は、設定に従って即カットかフェードアウト
+    if (current) {
+      if (result.cause === 'marker') tails.push(current.voice); // マーカー：前の曲は最後まで鳴らす（停止したら一緒に止める）
+      else releasePrevious(current.voice); // 再生中の曲は、設定に従って即カットかフェードアウト
+    }
     var t = tracks.get(result.trackId);
     var offset = rangeOf(t).start; // 再生範囲の開始から
     if (standbyStart && standbyStart.trackId === result.trackId) offset = standbyStart.offset;
     standbyStart = null; // 「途中から再生」は1回限り。次に同じ曲を出す時は開始位置から
+    if (videoManual !== 'auto') videoManual = 'auto'; // 映像の手動の切り替えは、次の曲が始まるまで
     var entry = { trackId: result.trackId, voice: null };
+    var mAt = markerFireAt(t);
+    entry.markerDone = mAt != null && offset >= mAt; // マーカーより後から出した時は効かせない
     entry.voice = audio.play(buffers.get(result.trackId), playOptions(t, offset, entry));
     current = entry;
   }
@@ -741,6 +821,9 @@
       var old = entry.voice;
       entry.voice = audio.play(buffer, playOptions(t, target, entry));
       audio.cut(old);
+      // マーカーより前に戻したら、もう一度効くようにする（リハーサル用）
+      var mAt = markerFireAt(t);
+      entry.markerDone = mAt != null && target >= mAt;
       tick();
       return;
     }
@@ -1098,6 +1181,7 @@
       if (t.vocal && t.vocal.level < 0.995) titleCell.appendChild(cell('vocal-tag', 'Vo ' + Math.round(t.vocal.level * 100) + '%'));
       var gdb = trackGainDb(t);
       if (t.loud && Math.abs(gdb) >= 0.5) titleCell.appendChild(cell('gain-tag', fmtDb(gdb).replace(' ', '')));
+      if (markerUsable(t)) titleCell.appendChild(cell('marker-tag', '◆' + fmtShort(t.marker) + (t.markerDelay ? '+' + t.markerDelay + 's' : '')));
       titleCell.title = locked ? '' : 'ダブルクリックで曲名を変更';
 
       row.appendChild(titleCell);
@@ -1222,6 +1306,7 @@
     $('removeBtn').disabled = locked || t.id === state.playingId;
     $('trimHeadAll').disabled = locked;
     $('alignAfter').disabled = locked;
+    renderMarker(t);
     renderGain(t);
     renderVocal(t, state);
     renderCueEditor(t);
@@ -1463,6 +1548,14 @@
         (left <= 0 ? '' : left <= DANGER_SECONDS ? ' is-danger' : left <= WARN_SECONDS ? ' is-warn' : ''));
       $('nowSub').textContent = fmtClock(pos) + ' / ' + fmtClock(playing.info.duration) +
         (looping ? '（ループ中）' : (left <= 0 && pos < range.end ? '（末尾の無音）' : ''));
+      var mAt = !current.markerDone ? markerFireAt(playing) : null;
+      if (mAt != null && mAt - pos <= 30 && mAt >= pos) {
+        var mk = document.createElement('span');
+        mk.className = 'now-marker';
+        mk.textContent = '　マーカー：次の曲まで ' + Math.max(0, mAt - pos).toFixed(1) + '秒';
+        $('nowSub').appendChild(mk);
+      }
+      waveMarker = markerUsable(playing) ? playing.marker / playing.info.duration : -1;
       drawWave(playing.info, pos / playing.info.duration, -1, range);
     } else {
       remain.textContent = '--:--';
@@ -1472,6 +1565,7 @@
       var hasInfo = standby && standby.info;
       var startRatio = hasInfo && standbyStart && standbyStart.trackId === standby.id
         ? standbyStart.offset / standby.info.duration : -1;
+      waveMarker = hasInfo && markerUsable(standby) ? standby.marker / standby.info.duration : -1;
       drawWave(hasInfo ? standby.info : null, -1, startRatio, hasInfo ? rangeOf(standby) : null);
     }
     $('waveWrap').classList.toggle('is-seekable', canSeek(state));
@@ -1560,6 +1654,8 @@
   // progress が 0〜1 なら再生位置（それより前は暗く）。-1 はスタンバイ曲の下見表示
   // startRatio が 0〜1 なら「ここから再生」の印を付ける
   //        range { start, end }（秒）があれば、範囲の外を暗くして開始・終了の印を付ける
+  var waveMarker = -1; // 波形に出すマーカーの位置（0〜1、なければ -1）
+
   function drawWave(info, progress, startRatio, range) {
     var canvas = $('wave');
     var ratio = window.devicePixelRatio || 1;
@@ -1623,6 +1719,15 @@
     if (!info.allSilent && tailSilence(info) >= TAIL_SILENCE_NOTE) {
       g.fillStyle = '#a3abb8';
       g.fillRect(Math.min(width - 2, (info.audibleEnd / info.duration) * width), 0, 2, waveHeight);
+    }
+    // マーカーの印（オレンジ）
+    if (waveMarker >= 0) {
+      g.fillStyle = '#ffb224';
+      var mx = Math.min(width - 2, waveMarker * width);
+      g.fillRect(mx, 0, 2, waveHeight);
+      g.beginPath();
+      g.moveTo(mx - 4, 0); g.lineTo(mx + 6, 0); g.lineTo(mx + 1, 6);
+      g.fill();
     }
     // 「ここから再生」の印
     if (startRatio >= 0) {
@@ -1903,6 +2008,33 @@
     });
     vocalUseGpu = loadSetting('vocalGpu', '1') !== '0';
     $('trimHeadAll').addEventListener('click', function (e) { e.currentTarget.blur(); trimHeadAll(); });
+    $('markerTime').addEventListener('change', function (e) {
+      var t = selectedTrack();
+      var raw = e.target.value.trim();
+      e.target.blur();
+      if (!t) return;
+      if (!raw) { setMarker(t, null); return; }
+      var v = parseTime(raw);
+      if (v == null) { toast('時間は「3:55.0」のように入力してください'); render(); return; }
+      setMarker(t, v);
+    });
+    $('markerTime').addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' || e.key === 'Escape') { e.preventDefault(); e.target.blur(); }
+    });
+    $('markerDelay').addEventListener('change', function (e) {
+      var t = selectedTrack();
+      e.target.blur();
+      if (!t || locked) return;
+      t.markerDelay = Math.max(0, Math.min(MARKER_DELAY_MAX, Number(e.target.value) || 0));
+      if (current && current.trackId === t.id) current.markerDone = audio.position(current.voice) >= markerFireAt(t);
+      afterChange();
+    });
+    $('markerNow').addEventListener('click', function (e) {
+      e.currentTarget.blur();
+      var t = selectedTrack();
+      if (t && current && current.trackId === t.id) setMarker(t, audio.position(current.voice));
+    });
+    $('markerClear').addEventListener('click', function (e) { e.currentTarget.blur(); setMarker(selectedTrack(), null); });
     $('alignAfter').addEventListener('click', function (e) { e.currentTarget.blur(); alignAfterToCues(); });
     $('gainDown').addEventListener('click', function (e) { e.currentTarget.blur(); var t = selectedTrack(); if (t) setGainAdj(t, (t.gainAdj || 0) - 0.5); });
     $('gainUp').addEventListener('click', function (e) { e.currentTarget.blur(); var t = selectedTrack(); if (t) setGainAdj(t, (t.gainAdj || 0) + 0.5); });
@@ -1948,13 +2080,11 @@
     $('videoTarget').addEventListener('change', function (e) { setVideoTarget(e.target.value); e.target.blur(); });
     $('videoDelay').addEventListener('change', function (e) { setVideoDelay(parseFloat(e.target.value)); e.target.blur(); });
     $('videoDelay').addEventListener('keydown', function (e) { e.stopPropagation(); if (e.key === 'Enter') e.target.blur(); });
-    $('videoStillBtn').addEventListener('click', function () { $('videoStillInput').value = ''; $('videoStillInput').click(); });
-    $('videoStillInput').addEventListener('change', function () { var f = $('videoStillInput').files[0]; if (f) setVideoStill(f); });
-    $('videoStillClear').addEventListener('click', function () { setVideoStill(null); });
+    bindLogos();
     if (videoAvailable() && window.ponNative.video.onClosed) {
       window.ponNative.video.onClosed(function () {
         videoOut = { open: false, target: null, label: '' };
-        videoSent.key = null; videoSent.prepared = null;
+        videoSent.key = null; videoSent.sig = ''; videoSent.prepared = null;
         renderVideoDialog(); render();
         toast('映像出力のウィンドウが閉じました');
       });
@@ -2290,13 +2420,15 @@
       if (t.gainAdj) saved[t.id].gainAdj = t.gainAdj;
       if (t.autoCue === 'pending') saved[t.id].autoCue = 'pending';
       if (t.vocal && t.vocalInfo) saved[t.id].vocalInfo = t.vocalInfo;
+      if (t.marker != null) { saved[t.id].marker = t.marker; saved[t.id].markerDelay = t.markerDelay || 0; }
     });
     return {
       id: show.id,
       name: show.name,
       createdAt: show.createdAt,
       updatedAt: Date.now(),
-      groups: groups.map(function (g) { return { id: g.id, name: g.name, trackIds: g.trackIds.slice() }; }),
+      groups: groups.map(function (g) { return { id: g.id, name: g.name, trackIds: g.trackIds.slice(), logo: g.logo || null }; }),
+      logo: show.logo || null,
       tracks: saved,
       standbyId: state.standbyId,
       played: Object.keys(state.played).filter(function (id) { return tracks.has(id); }),
@@ -2377,12 +2509,12 @@
 
   function loadShow(data) {
     resetSession();
-    show = { id: data.id, name: data.name, createdAt: data.createdAt };
+    show = { id: data.id, name: data.name, createdAt: data.createdAt, logo: data.logo || null };
     var savedTracks = data.tracks || {};
     var ids = [];
     var seen = {};
     (data.groups || []).forEach(function (sg) {
-      var g = { id: sg.id, name: sg.name, trackIds: [] };
+      var g = { id: sg.id, name: sg.name, trackIds: [], logo: sg.logo || null };
       groups.push(g);
       (sg.trackIds || []).forEach(function (id) {
         // 同じ曲が二重に入っていたら1つにする（Ver. 0.7.1 のグループ移動の不具合の後始末）
@@ -2418,7 +2550,9 @@
           loud: x.data.loud,
           gainAdj: x.data.gainAdj,
           autoCue: x.data.autoCue,
-          vocalInfo: x.data.vocalInfo
+          vocalInfo: x.data.vocalInfo,
+          marker: x.data.marker,
+          markerDelay: x.data.markerDelay
         });
       });
       syncOrder();
@@ -2523,7 +2657,7 @@
 
   var videoCh = ('BroadcastChannel' in window) ? new BroadcastChannel('pon-video') : null;
   var videoOut = { open: false, target: null, label: '' }; // 映像出力ウィンドウの状態
-  var videoSent = { key: null, voice: null, fading: false, lastSync: 0, prepared: null };
+  var videoSent = { key: null, sig: '', lastSync: 0, prepared: null };
   var videoDelayMs = clampDelay(parseFloat(loadSetting('videoDelayMs', '0')));
 
   function clampDelay(v) { return isFinite(v) ? Math.max(-1000, Math.min(1000, Math.round(v / 10) * 10)) : 0; }
@@ -2535,25 +2669,50 @@
     return current && current.voice ? audio.position(current.voice) : 0;
   }
 
+  // ----- 映像・ロゴ・黒の出し分け（Ver. 0.11.0） -----
+  // 自動：映像付きの曲 → 映像 ／ 映像なしの曲 → その曲のグループのロゴ（なければ黒）／ 何も鳴っていない → 黒
+  // 手動：黒・イベントロゴ・グループロゴ（表示中のグループ）。次に曲が始まるまで（GO・続けて再生・マーカー）続く
+  // 切り替えはすべて2秒のフェード
+  var VIDEO_FADE = 2;
+  var videoManual = 'auto';
+
+  function logoKey(kind, id) { return 'logo-' + kind + '-' + id; }
+  function eventLogoKey() { return show && show.logo ? logoKey('ev', show.id) : null; }
+  function groupLogoKey(g) { return g && g.logo ? logoKey('gr', g.id) : null; }
+
+  function videoScene() {
+    if (videoManual === 'black') return { mode: 'black' };
+    if (videoManual === 'event') { var ek = eventLogoKey(); return ek ? { mode: 'image', image: ek } : { mode: 'black' }; }
+    if (videoManual === 'group') { var gk = groupLogoKey(viewGroup()); return gk ? { mode: 'image', image: gk } : { mode: 'black' }; }
+    var t = current && tracks.get(current.trackId);
+    if (!t || !current.voice || current.voice.fading) return { mode: 'black' };
+    if (isVideoTrack(t)) return { mode: 'video', key: t.id };
+    var k = groupLogoKey(groupOf(t.id));
+    return k ? { mode: 'image', image: k } : { mode: 'black' };
+  }
+
+  function setVideoManual(mode) {
+    videoManual = mode || 'auto';
+    videoReconcile(false);
+    render();
+  }
+
   // 本体の再生状態に、映像出力を合わせる
   function videoReconcile(force) {
     if (!videoCh || !videoOut.open) return;
-    var t = current && tracks.get(current.trackId);
-    var vt = isVideoTrack(t) ? t : null;
+    var sc = videoScene();
     var nowMs = Date.now();
-    if (!vt) {
-      if (videoSent.key || force) videoPost({ type: 'stop' });
-      videoSent.key = null; videoSent.voice = null; videoSent.fading = false;
-    } else if (force || videoSent.key !== vt.id || videoSent.voice !== current.voice) {
-      // 新しい曲・再生位置の移動・ループのかけ直し
-      videoSent.key = vt.id; videoSent.voice = current.voice; videoSent.fading = false; videoSent.lastSync = nowMs;
-      videoPost({ type: 'play', key: vt.id, pos: videoPos(), sentAt: nowMs });
-    } else if (current.voice.fading && !videoSent.fading) {
-      videoSent.fading = true;
-      videoPost({ type: 'fade', seconds: FADE_SECONDS });
-    } else if (!videoSent.fading && nowMs - videoSent.lastSync >= 500) {
+    var sig = sc.mode + '|' + (sc.key || '') + '|' + (sc.image || '') + '|' + (sc.mode === 'video' && current ? voiceId(current.voice) : '');
+    if (force || sig !== videoSent.sig) {
+      videoSent.sig = sig;
+      videoSent.key = sc.mode === 'video' ? sc.key : null;
       videoSent.lastSync = nowMs;
-      videoPost({ type: 'sync', key: vt.id, pos: videoPos(), sentAt: nowMs });
+      var msg = { type: 'scene', mode: sc.mode, image: sc.image || null, key: sc.key || null, fade: VIDEO_FADE };
+      if (sc.mode === 'video') { msg.pos = videoPos(); msg.sentAt = nowMs; }
+      videoPost(msg);
+    } else if (sc.mode === 'video' && nowMs - videoSent.lastSync >= 500) {
+      videoSent.lastSync = nowMs;
+      videoPost({ type: 'sync', key: sc.key, pos: videoPos(), sentAt: nowMs });
     }
     // 次に出る曲が映像付きなら、先に読み込んでおいてもらう
     var st = engine.getState(now());
@@ -2563,6 +2722,57 @@
       videoSent.prepared = prep;
       if (prep) videoPost({ type: 'prepare', key: prep });
     }
+  }
+
+  // 再生のかけ直し（位置の移動・ループ）を見分けるため、音ごとに番号を振る
+  var voiceIds = typeof WeakMap === 'function' ? new WeakMap() : null;
+  var voiceSeq = 0;
+  function voiceId(v) {
+    if (!v || !voiceIds) return '';
+    if (!voiceIds.has(v)) voiceIds.set(v, ++voiceSeq);
+    return voiceIds.get(v);
+  }
+
+  // ----- ロゴの画像 -----
+  var logoUrls = {}; // キー → 画面に出す小さい画像の URL
+
+  function logoUrl(key) {
+    if (!key || !storeOk) return Promise.resolve(null);
+    if (logoUrls[key]) return Promise.resolve(logoUrls[key]);
+    return store.getFile(key).then(function (f) {
+      if (!f) return null;
+      logoUrls[key] = URL.createObjectURL(f);
+      return logoUrls[key];
+    }, function () { return null; });
+  }
+
+  function forgetLogo(key) {
+    if (logoUrls[key]) { URL.revokeObjectURL(logoUrls[key]); delete logoUrls[key]; }
+    if (videoCh) videoCh.postMessage({ type: 'images', key: key });
+  }
+
+  function setEventLogo(file) {
+    if (!storeOk || !show) return Promise.resolve();
+    var key = logoKey('ev', show.id);
+    var job = file ? store.putFile(key, file) : store.deleteFiles([key]);
+    return job.then(function () {
+      show.logo = file ? { name: file.name || 'ロゴ' } : null;
+      forgetLogo(key);
+      saveSoon(); render(); renderLogos();
+      toast(file ? 'イベントロゴを「' + (file.name || 'ロゴ') + '」にしました' : 'イベントロゴを外しました');
+    }, function () { toast('ロゴを保存できませんでした'); });
+  }
+
+  function setGroupLogo(g, file, quiet) {
+    if (!storeOk || !g) return Promise.resolve();
+    var key = logoKey('gr', g.id);
+    var job = file ? store.putFile(key, file) : store.deleteFiles([key]);
+    return job.then(function () {
+      g.logo = file ? { name: file.name || 'ロゴ' } : null;
+      forgetLogo(key);
+      saveSoon(); render(); renderLogos();
+      if (!quiet) toast(file ? '「' + g.name + '」のロゴを「' + (file.name || 'ロゴ') + '」にしました' : '「' + g.name + '」のロゴを外しました');
+    }, function () { toast('ロゴを保存できませんでした'); });
   }
 
   if (videoCh) {
@@ -2582,6 +2792,7 @@
     $('videoBackdrop').hidden = false;
     refreshVideoTargets();
     renderVideoDialog();
+    if (!logoFolderFiles.length && loadSetting('logoFolder', '')) loadLogoFolder();
   }
 
   function closeVideoDialog() { $('videoBackdrop').hidden = true; }
@@ -2608,7 +2819,7 @@
     if (!value) {
       nv.close();
       videoOut = { open: false, target: null, label: '' };
-      videoSent.key = null; videoSent.prepared = null;
+      videoSent.key = null; videoSent.sig = ''; videoSent.prepared = null;
       renderVideoDialog(); render();
       return;
     }
@@ -2628,23 +2839,10 @@
     renderVideoDialog();
   }
 
-  function setVideoStill(file) {
-    if (!storeOk) return;
-    var job = file ? store.putFile('video-still', file) : store.deleteFiles(['video-still']);
-    job.then(function () {
-      saveSetting('videoStillName', file ? file.name : '');
-      if (videoCh) videoCh.postMessage({ type: 'still' });
-      renderVideoDialog();
-      toast(file ? '静止画を「' + file.name + '」にしました' : '静止画を外しました（何もない時は黒）');
-    });
-  }
-
   function renderVideoDialog() {
     var input = $('videoDelay');
     if (document.activeElement !== input) input.value = String(videoDelayMs);
-    var name = loadSetting('videoStillName', '');
-    $('videoStillName').textContent = name || 'なし（黒）';
-    $('videoStillClear').disabled = !name;
+    renderLogos();
     $('videoState').textContent = videoOut.open ? '映像出力中：' + videoOut.label : '映像出力はしていません';
   }
 
@@ -2653,6 +2851,180 @@
     b.hidden = !videoAvailable();
     b.classList.toggle('is-on', videoOut.open);
     $('videoBtnLabel').textContent = videoOut.open ? '映像出力中' : '映像出力';
+    var box = $('videoModeBox');
+    box.hidden = !videoOut.open;
+    box.classList.toggle('is-manual', videoManual !== 'auto');
+    Array.prototype.forEach.call(box.querySelectorAll('[data-vmode]'), function (btn) {
+      btn.setAttribute('aria-pressed', String(btn.dataset.vmode === videoManual));
+      if (btn.dataset.vmode === 'event') btn.disabled = !eventLogoKey();
+      if (btn.dataset.vmode === 'group') btn.disabled = !groupLogoKey(viewGroup());
+    });
+    // イベント名の横のロゴボタン
+    var lb = $('eventLogoBtn');
+    lb.hidden = !videoAvailable();
+    var ek = eventLogoKey();
+    lb.classList.toggle('has-logo', !!ek);
+    lb.title = ek ? 'イベントロゴ：' + show.logo.name + '（クリックで変更）' : 'イベントロゴ（映像出力で使う画像）を選ぶ';
+    if (ek) logoUrl(ek).then(function (u) { if (u && $('eventLogoBtnImg').getAttribute('src') !== u) $('eventLogoBtnImg').src = u; });
+  }
+
+  // ----- ロゴの設定（映像出力のダイアログ） -----
+  var logoActiveGroup = null;   // 画像を当てはめるグループ
+  var logoFolderFiles = [];     // フォルダの中の画像の名前
+  var logoThumbs = {};          // 名前 → サムネイルの URL（フォルダの画像）
+
+  function logoAvailable() { return !!(window.ponNative && window.ponNative.logos); }
+
+  function thumbInto(el, key) {
+    el.style.backgroundImage = '';
+    if (key) logoUrl(key).then(function (u) { if (u) el.style.backgroundImage = 'url("' + u + '")'; });
+  }
+
+  function renderLogos() {
+    if ($('videoBackdrop').hidden) return;
+    var ek = eventLogoKey();
+    thumbInto($('eventLogoThumb'), ek);
+    $('eventLogoName').textContent = ek ? show.logo.name : 'なし';
+    $('eventLogoClear').disabled = !ek;
+    var ul = $('logoGroups');
+    ul.textContent = '';
+    if (!groups.some(function (g) { return g.id === logoActiveGroup; })) logoActiveGroup = (viewGroup() || {}).id || null;
+    groups.forEach(function (g) {
+      var li = document.createElement('li');
+      li.className = g.id === logoActiveGroup ? 'is-active' : '';
+      var th = cell('logo-thumb', null);
+      thumbInto(th, groupLogoKey(g));
+      li.appendChild(th);
+      li.appendChild(cell('lg-name', g.name + (g.logo ? '' : '（ロゴなし）')));
+      var pick = document.createElement('button');
+      pick.type = 'button'; pick.className = 'btn btn-small'; pick.textContent = '画像を選ぶ';
+      pick.addEventListener('click', function (e) { e.stopPropagation(); logoActiveGroup = g.id; $('groupLogoInput').value = ''; $('groupLogoInput').click(); });
+      var clr = document.createElement('button');
+      clr.type = 'button'; clr.className = 'btn btn-small'; clr.textContent = '外す'; clr.disabled = !g.logo;
+      clr.addEventListener('click', function (e) { e.stopPropagation(); setGroupLogo(g, null); });
+      li.appendChild(pick);
+      li.appendChild(clr);
+      li.addEventListener('click', function () { logoActiveGroup = g.id; renderLogos(); });
+      ul.appendChild(li);
+    });
+    var dir = loadSetting('logoFolder', '');
+    var parts = dir.split(/[\\/]/).filter(Boolean);
+    $('logoFolderPath').textContent = dir ? (parts.length > 2 ? '…/' : '/') + parts.slice(-2).join('/') : '未指定';
+    $('logoFolderPath').title = dir;
+    var folderOk = logoAvailable();
+    $('logoFolderPick').disabled = !folderOk;
+    $('logoFolderReload').disabled = !folderOk || !dir;
+    $('logoAutoMatch').disabled = !logoFolderFiles.length;
+    var grid = $('logoGrid');
+    grid.textContent = '';
+    logoFolderFiles.forEach(function (name) {
+      var c = document.createElement('button');
+      c.type = 'button';
+      c.className = 'logo-cell';
+      c.title = name + '（クリックで、選んでいるグループのロゴに）';
+      var img = document.createElement('img');
+      img.alt = '';
+      if (logoThumbs[name]) img.src = logoThumbs[name];
+      c.appendChild(img);
+      c.appendChild(cell('', name.replace(/\.[^.]+$/, '')));
+      c.addEventListener('click', function () { assignFolderLogo(name); });
+      grid.appendChild(c);
+    });
+  }
+
+  function folderFile(name) {
+    var dir = loadSetting('logoFolder', '');
+    return window.ponNative.logos.read(dir, name).then(function (bytes) {
+      var ext = (name.match(/\.([^.]+)$/) || ['', 'png'])[1].toLowerCase();
+      var type = ext === 'jpg' ? 'image/jpeg' : 'image/' + ext;
+      return new File([bytes], name, { type: type });
+    });
+  }
+
+  function assignFolderLogo(name) {
+    var g = groupById(logoActiveGroup);
+    if (!g) { toast('先にグループを選んでください'); return; }
+    folderFile(name).then(function (f) { return setGroupLogo(g, f); }, function () { toast('画像を読み込めませんでした'); });
+  }
+
+  function loadLogoFolder() {
+    var dir = loadSetting('logoFolder', '');
+    Object.keys(logoThumbs).forEach(function (k) { URL.revokeObjectURL(logoThumbs[k]); });
+    logoThumbs = {};
+    logoFolderFiles = [];
+    if (!dir || !logoAvailable()) { renderLogos(); return Promise.resolve(); }
+    return window.ponNative.logos.list(dir).then(function (names) {
+      if (names == null) { toast('ロゴのフォルダが見つかりません（USB メモリなどを確認してください）'); renderLogos(); return; }
+      logoFolderFiles = names;
+      renderLogos();
+      // サムネイルは1枚ずつ読む
+      return names.reduce(function (p, name) {
+        return p.then(function () {
+          return folderFile(name).then(function (f) {
+            logoThumbs[name] = URL.createObjectURL(f);
+            var cells = $('logoGrid').querySelectorAll('.logo-cell');
+            var i = logoFolderFiles.indexOf(name);
+            if (cells[i]) cells[i].querySelector('img').src = logoThumbs[name];
+          }, function () {});
+        });
+      }, Promise.resolve());
+    });
+  }
+
+  function normName(x) { return String(x || '').normalize('NFKC').toLowerCase().replace(/\.[^.]+$/, '').replace(/[\s_\-・]+/g, ''); }
+
+  function autoMatchLogos(onlyEmpty) {
+    var n = 0;
+    var jobs = [];
+    groups.forEach(function (g) {
+      if (onlyEmpty && g.logo) return;
+      var name = logoFolderFiles.filter(function (f) { return normName(f) === normName(g.name); })[0];
+      if (!name) return;
+      n++;
+      jobs.push(folderFile(name).then(function (f) { return setGroupLogo(g, f, true); }, function () {}));
+    });
+    return Promise.all(jobs).then(function () {
+      toast(n ? n + 'グループのロゴを、同じ名前の画像に合わせました' : 'グループ名と同じ名前の画像はありませんでした');
+    });
+  }
+
+  // 0.10 までの「何もない時の静止画」は、開いているイベントのイベントロゴに引き継ぐ（1回だけ）
+  function migrateStill() {
+    if (!storeOk || !show || !loadSetting('videoStillName', '')) return;
+    var name = loadSetting('videoStillName', '');
+    store.getFile('video-still').then(function (f) {
+      if (!f) { saveSetting('videoStillName', ''); return; }
+      var job = show.logo ? Promise.resolve() : setEventLogo(new File([f], name, { type: f.type || 'image/png' }));
+      return job.then(function () {
+        saveSetting('videoStillName', '');
+        return store.deleteFiles(['video-still']);
+      });
+    }).catch(function () {});
+  }
+
+  function bindLogos() {
+    setTimeout(migrateStill, 1500);
+    $('eventLogoBtn').addEventListener('click', function (e) { e.currentTarget.blur(); $('eventLogoInput').value = ''; $('eventLogoInput').click(); });
+    $('eventLogoPick').addEventListener('click', function () { $('eventLogoInput').value = ''; $('eventLogoInput').click(); });
+    $('eventLogoInput').addEventListener('change', function () { var f = $('eventLogoInput').files[0]; if (f) setEventLogo(f); });
+    $('eventLogoClear').addEventListener('click', function () { setEventLogo(null); });
+    $('groupLogoInput').addEventListener('change', function () {
+      var f = $('groupLogoInput').files[0];
+      var g = groupById(logoActiveGroup);
+      if (f && g) setGroupLogo(g, f);
+    });
+    $('logoFolderPick').addEventListener('click', function () {
+      window.ponNative.logos.pickFolder().then(function (dir) {
+        if (!dir) return;
+        saveSetting('logoFolder', dir);
+        loadLogoFolder().then(function () { if (logoFolderFiles.length) autoMatchLogos(true); });
+      });
+    });
+    $('logoFolderReload').addEventListener('click', function () { loadLogoFolder(); });
+    $('logoAutoMatch').addEventListener('click', function () { autoMatchLogos(false); });
+    Array.prototype.forEach.call($('videoModeBox').querySelectorAll('[data-vmode]'), function (btn) {
+      btn.addEventListener('click', function () { btn.blur(); setVideoManual(btn.dataset.vmode); });
+    });
   }
 
   // ---------- ボーカル調整（アプリ版のみ） ----------
@@ -2856,6 +3228,8 @@
 
   function fileKeysOfShow(data) {
     var keys = Object.keys(data.tracks || {});
+    if (data.logo) keys.push(logoKey('ev', data.id));
+    (data.groups || []).forEach(function (g) { if (g.logo) keys.push(logoKey('gr', g.id)); });
     keys.slice().forEach(function (id) { if (data.tracks[id].vocal) keys.push(vocalKey(id)); });
     (data.sePads || []).forEach(function (p) { if (p) keys.push(p.id); });
     return keys;
@@ -2930,17 +3304,22 @@
       return store.listShows().then(function (existing) {
         var taken = existing.map(function (s) { return s.name; });
         var shows = (m.shows || []).map(function (sd) {
+          var newShowId = uid('s');
+          if (sd.logo) remap[logoKey('ev', sd.id)] = logoKey('ev', newShowId);
           var tracksNew = {};
           Object.keys(sd.tracks || {}).forEach(function (id) { tracksNew[newKey(id, 't')] = sd.tracks[id]; });
           var name = uniqueName(sd.name || 'イベント', taken);
           taken.push(name);
           return {
-            id: uid('s'),
+            id: newShowId,
             name: name,
+            logo: sd.logo || null,
             createdAt: sd.createdAt || Date.now(),
             updatedAt: Date.now(),
             groups: (sd.groups || []).map(function (g) {
-              return { id: uid('g'), name: g.name, trackIds: (g.trackIds || []).filter(function (id) { return sd.tracks && sd.tracks[id]; }).map(function (id) { return newKey(id, 't'); }) };
+              var ng = uid('g');
+              if (g.logo) remap[logoKey('gr', g.id)] = logoKey('gr', ng);
+              return { id: ng, name: g.name, logo: g.logo || null, trackIds: (g.trackIds || []).filter(function (id) { return sd.tracks && sd.tracks[id]; }).map(function (id) { return newKey(id, 't'); }) };
             }),
             tracks: tracksNew,
             standbyId: sd.standbyId && remap[sd.standbyId] ? remap[sd.standbyId] : null,
@@ -4275,6 +4654,7 @@
     bgmAudio: bgmAudio,
     bgmOutLost: function () { return bgmOutLost; },
     cdBusy: function () { return !!cdJob; },
+    tailsInfo: function () { return tails.map(function (v) { return { playing: !v.stopped && !v.finished, fading: !!v.fading, pos: audio.position(v) }; }); },
     tracks: tracks,
     buffers: buffers,
     importItems: importItems,
