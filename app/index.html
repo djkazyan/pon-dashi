@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ポン出し</title>
-<link rel="stylesheet" href="style.css?v=0.12.0">
+<link rel="stylesheet" href="style.css?v=0.12.1">
 </head>
 <body>
 <div class="app" id="app">
@@ -12,7 +12,7 @@
   <header class="topbar">
     <div class="brand">
       <span class="brand-name">ポン出し</span>
-      <span class="brand-ver" id="appVersion" data-version="0.12.0">Ver. 0.12.0</span>
+      <span class="brand-ver" id="appVersion" data-version="0.12.1">Ver. 0.12.1</span>
       <button type="button" class="btn btn-small update-btn" id="updateBtn" hidden>新しい版があります</button>
       <input type="text" class="show-name" id="showName" aria-label="イベント名" maxlength="60" spellcheck="false">
       <button type="button" class="logo-btn" id="eventLogoBtn" title="イベントロゴ（映像出力で使う画像）を選ぶ" hidden><img id="eventLogoBtnImg" alt=""><span id="eventLogoBtnText">ロゴ</span></button>
@@ -119,6 +119,15 @@
 
     <div class="side">
     <aside class="detail" id="detail" aria-label="選択中の曲" hidden>
+      <!-- よく使うボタンは、右側をスクロールしても一番上に見えるように固定（Ver. 0.12.1） -->
+      <div class="detail-sticky" id="detailSticky">
+        <button type="button" class="btn btn-primary" id="standbyBtn">スタンバイにする</button>
+        <div class="detail-row">
+          <button type="button" class="btn" id="moveUpBtn">上へ</button>
+          <button type="button" class="btn" id="moveDownBtn">下へ</button>
+          <button type="button" class="btn" id="removeBtn">削除</button>
+        </div>
+      </div>
       <div class="detail-label">選択中の曲</div>
       <div class="detail-title" id="detailTitle"></div>
       <dl class="detail-list" id="detailList"></dl>
@@ -158,6 +167,10 @@
           <div class="range-row">
             <label class="range-field"><span>位置</span><input type="text" class="range-input" id="markerTime" spellcheck="false" inputmode="decimal" placeholder="なし"></label>
             <label class="range-field"><span>次の曲まで</span><select class="select select-small" id="markerDelay" aria-label="マーカーから次の曲までの秒数"></select></label>
+          </div>
+          <div class="detail-row marker-nudge">
+            <button type="button" class="btn btn-small" id="markerMinus" title="マーカーを0.1秒前へ">−0.1秒</button>
+            <button type="button" class="btn btn-small" id="markerPlus" title="マーカーを0.1秒後ろへ">＋0.1秒</button>
           </div>
           <div class="detail-row">
             <button type="button" class="btn btn-small" id="markerNow">今の位置をマーカーに</button>
@@ -202,12 +215,6 @@
         </div>
       </div>
       <div class="detail-actions">
-        <button type="button" class="btn btn-primary" id="standbyBtn">スタンバイにする</button>
-        <div class="detail-row">
-          <button type="button" class="btn" id="moveUpBtn">上へ</button>
-          <button type="button" class="btn" id="moveDownBtn">下へ</button>
-          <button type="button" class="btn" id="removeBtn">削除</button>
-        </div>
         <label class="move-group">
           <span>グループ</span>
           <select id="moveGroupSelect" aria-label="この曲のグループ"></select>
@@ -460,11 +467,11 @@
   </div>
 </div>
 
-<script src="cue-engine.js?v=0.12.0"></script>
-<script src="store.js?v=0.12.0"></script>
-<script src="audio-engine.js?v=0.12.0"></script>
-<script src="backup.js?v=0.12.0"></script>
-<script src="key-detect.js?v=0.12.0"></script>
-<script src="app.js?v=0.12.0"></script>
+<script src="cue-engine.js?v=0.12.1"></script>
+<script src="store.js?v=0.12.1"></script>
+<script src="audio-engine.js?v=0.12.1"></script>
+<script src="backup.js?v=0.12.1"></script>
+<script src="key-detect.js?v=0.12.1"></script>
+<script src="app.js?v=0.12.1"></script>
 </body>
 </html>

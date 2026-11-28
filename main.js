@@ -17,9 +17,14 @@ app.setName('ポン出し');
 app.setPath('userData', path.join(app.getPath('appData'), 'ポン出し'));
 
 function createWindow() {
+  // 最初は画面の8割くらいの大きさで開く（狭い画面でも 1360×860 より小さくはしない。画面より大きくもしない）
+  const work = screen.getPrimaryDisplay().workAreaSize;
+  const winW = Math.min(work.width, Math.max(1360, Math.round(work.width * 0.8)));
+  const winH = Math.min(work.height, Math.max(860, Math.round(work.height * 0.8)));
   mainWindow = new BrowserWindow({
-    width: 1360,
-    height: 860,
+    width: winW,
+    height: winH,
+    center: true,
     minWidth: 900,
     minHeight: 600,
     backgroundColor: '#101216',

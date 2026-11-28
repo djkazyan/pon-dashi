@@ -15,7 +15,7 @@
   var SEEK_SMALL = 10;          // ←→ キーと「10秒」ボタンで動かす秒数
   var SEEK_LARGE = 60;          // Shift+←→ と「1分」ボタンで動かす秒数
   var ASK_OUTPUTS = '__ask';    // 出力の選択肢「ほかの出力デバイスを表示…」
-  var APP_VERSION = '0.12.0'; // index.html の版と違えば、古いファイルが読み込まれている
+  var APP_VERSION = '0.12.1'; // index.html の版と違えば、古いファイルが読み込まれている
   var AUDIO_EXT = /\.(wav|wave|mp3|m4a|aac|flac|ogg|oga|opus|aif|aiff|mp4|m4v|mov)$/i;
   var MARKER_DELAY_MAX = 10;    // マーカーから次の曲までの最大秒数
   var LOUD_TARGET = -11;       // オートゲインの目標（LUFS）
@@ -358,6 +358,11 @@
   }
 
   function checkMarker() {
+    // 止めた後でもマーカーを打てるよう、鳴らしている位置を覚えておく（フェード中は覚えない＝フェードを始めた位置）
+    if (current && current.voice && !current.voice.fading) {
+      var playingTrack = tracks.get(current.trackId);
+      if (playingTrack) playingTrack.lastPos = audio.position(current.voice);
+    }
     if (!current || current.markerDone) return;
     var t = tracks.get(current.trackId);
     var at = markerFireAt(t);
@@ -401,8 +406,12 @@
     sel.value = String(t.markerDelay || 0);
     sel.disabled = locked || loop || t.marker == null;
     var isCurrent = !!(current && current.trackId === t.id);
-    $('markerNow').disabled = locked || !isCurrent || loop;
+    var canStopPos = !isCurrent && t.lastPos != null;
+    $('markerNow').textContent = isCurrent || !canStopPos ? '今の位置をマーカーに' : '止めた位置（' + fmtPrecise(t.lastPos) + '）をマーカーに';
+    $('markerNow').disabled = locked || loop || !(isCurrent || canStopPos);
     $('markerClear').disabled = locked || t.marker == null;
+    $('markerMinus').disabled = locked || loop || t.marker == null;
+    $('markerPlus').disabled = locked || loop || t.marker == null;
     var note = $('markerNote');
     var msg = '';
     if (loop && t.marker != null) msg = 'ループの曲なので、マーカーは使いません';
@@ -2114,8 +2123,20 @@
     $('markerNow').addEventListener('click', function (e) {
       e.currentTarget.blur();
       var t = selectedTrack();
-      if (t && current && current.trackId === t.id) setMarker(t, audio.position(current.voice));
+      if (!t) return;
+      if (current && current.trackId === t.id) setMarker(t, audio.position(current.voice));
+      else if (t.lastPos != null) setMarker(t, t.lastPos); // 止めた位置
     });
+    function nudgeMarker(step) {
+      var t = selectedTrack();
+      if (!t || t.marker == null || locked) return;
+      var r = rangeOf(t);
+      var v = Math.round((t.marker + step) * 10) / 10;
+      if (v < r.start || v > r.end) { toast('マーカーは再生範囲の中に打ってください'); return; }
+      setMarker(t, v);
+    }
+    $('markerMinus').addEventListener('click', function (e) { e.currentTarget.blur(); nudgeMarker(-0.1); });
+    $('markerPlus').addEventListener('click', function (e) { e.currentTarget.blur(); nudgeMarker(0.1); });
     $('markerClear').addEventListener('click', function (e) { e.currentTarget.blur(); setMarker(selectedTrack(), null); });
     $('keySelect').addEventListener('change', function (e) {
       var t = selectedTrack();
