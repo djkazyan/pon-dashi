@@ -15,7 +15,7 @@
   var SEEK_SMALL = 10;          // ←→ キーと「10秒」ボタンで動かす秒数
   var SEEK_LARGE = 60;          // Shift+←→ と「1分」ボタンで動かす秒数
   var ASK_OUTPUTS = '__ask';    // 出力の選択肢「ほかの出力デバイスを表示…」
-  var APP_VERSION = '0.11.1'; // index.html の版と違えば、古いファイルが読み込まれている
+  var APP_VERSION = '0.12.0'; // index.html の版と違えば、古いファイルが読み込まれている
   var AUDIO_EXT = /\.(wav|wave|mp3|m4a|aac|flac|ogg|oga|opus|aif|aiff|mp4|m4v|mov)$/i;
   var MARKER_DELAY_MAX = 10;    // マーカーから次の曲までの最大秒数
   var LOUD_TARGET = -11;       // オートゲインの目標（LUFS）
@@ -280,6 +280,70 @@
     return true;
   }
 
+  // ---------- キー（Ver. 0.12.0） ----------
+  // 手で直したキーがあればそれ、なければ解析の結果。{ key, name, label, relative, scale, conf, segments, user }
+  function keyOf(t) {
+    if (!t || !window.PonKey) return null;
+    var info = t.keyInfo && t.keyInfo.key != null ? t.keyInfo : null;
+    if (t.keyUser == null && !info) return null;
+    var main = t.keyUser != null ? t.keyUser : info.key;
+    var segs = info && info.segs && info.segs.length > 1 ? info.segs.map(function (x) { return { start: x[0], key: x[1] }; }) : null;
+    // 手で直した時は、最初の区間（曲の頭のキー）をそのキーにする
+    if (segs && t.keyUser != null) segs[0].key = t.keyUser;
+    var d = window.PonKey.describe(main, info ? info.conf : 1, segs || [{ start: 0, key: main }]);
+    d.user = t.keyUser != null;
+    d.conf = info ? info.conf : 1;
+    d.analyzed = info ? window.PonKey.keyName(info.key) : null;
+    return d;
+  }
+
+  function keyShort(t) {
+    var k = keyOf(t);
+    if (!k) return '';
+    if (k.segments.length > 1) return k.segments.map(function (sg) { return sg.name; }).join('→');
+    return k.name;
+  }
+
+  function renderKey(t) {
+    var k = keyOf(t);
+    var sel = $('keySelect');
+    if (!sel.options.length) {
+      addOption(sel, '', '自動');
+      for (var i = 0; i < 24; i++) addOption(sel, String(i), window.PonKey ? window.PonKey.keyLabel(i) + '（' + window.PonKey.keyName(i) + '）' : String(i));
+    }
+    sel.options[0].textContent = t.keyInfo && t.keyInfo.key != null ? '自動（推定：' + window.PonKey.keyName(t.keyInfo.key) + '）' : '自動';
+    sel.value = t.keyUser != null ? String(t.keyUser) : '';
+    sel.disabled = !t.info;
+    if (!k) {
+      $('keyName').textContent = t.status === 'error' || (t.keyInfo && t.keyInfo.key == null) ? '—' : (t.info ? '推定中…' : '—');
+      $('keyRel').textContent = '';
+      $('keyScale').textContent = '';
+      $('keySegs').hidden = true;
+      $('keyNote').hidden = true;
+      return;
+    }
+    $('keyName').textContent = k.name;
+    $('keyRel').textContent = k.label + '（' + k.relative + ' と同じ音）' + (k.user ? '・手で設定' : '');
+    var sc = $('keyScale');
+    sc.textContent = '';
+    k.scale.forEach(function (n) { var e = document.createElement('span'); e.textContent = n; sc.appendChild(e); });
+    var ul = $('keySegs');
+    ul.textContent = '';
+    if (k.segments.length > 1) {
+      k.segments.forEach(function (sg, i) {
+        var li = document.createElement('li');
+        li.appendChild(cell('ks-time', fmtShort(sg.start) + '〜'));
+        li.appendChild(cell('ks-name', window.PonKey.keyLabel(sg.key) + (i > 0 ? '（転調）' : '')));
+        ul.appendChild(li);
+      });
+    }
+    ul.hidden = k.segments.length < 2;
+    var note = '';
+    if (!k.user && k.conf < 0.2) note = '判定がはっきりしません。耳で確認してください';
+    $('keyNote').textContent = note;
+    $('keyNote').hidden = !note;
+  }
+
   // ---------- マーカー（Ver. 0.11.0） ----------
   // 曲の中に印を打ち、そこから指定の秒数後に次の曲（スタンバイ曲）を出す。今の曲は止めずに最後まで鳴らす。
   // ループの曲では使わない。手で GO・停止・フェードしたら、その曲のマーカーは取り消し。
@@ -463,7 +527,10 @@
       autoCue: data.autoCue === 'pending' ? 'pending' : 'done',
       // マーカー：この位置（秒）から markerDelay 秒後に、今の曲を鳴らしたまま次の曲を出す
       marker: isFinite(Number(data.marker)) && data.marker != null ? Math.max(0, Number(data.marker)) : null,
-      markerDelay: isFinite(Number(data.markerDelay)) ? Math.max(0, Math.min(MARKER_DELAY_MAX, Number(data.markerDelay))) : 0
+      markerDelay: isFinite(Number(data.markerDelay)) ? Math.max(0, Math.min(MARKER_DELAY_MAX, Number(data.markerDelay))) : 0,
+      // キー：解析の結果 { key, conf, segs: [[秒, key]] } と、手で直したキー（0〜23、なければ null）
+      keyInfo: data.keyInfo && typeof data.keyInfo === 'object' ? data.keyInfo : null,
+      keyUser: Number.isInteger(data.keyUser) && data.keyUser >= 0 && data.keyUser < 24 ? data.keyUser : null
     });
     g.trackIds.push(id);
     engine.addTrack({ id: id, ready: false });
@@ -613,6 +680,7 @@
   }
 
   var autoCueCount = 0;
+  var keyCount = 0; // この読み込みでキーを推定した曲の数（保存のきっかけ）
 
   function pump() {
     if (working) return;
@@ -620,6 +688,7 @@
     (function next() {
       if (!jobs.length) {
         working = false;
+        if (keyCount) { keyCount = 0; saveSoon(); render(); }
         if (autoCueCount) {
           toast(autoCueCount + '曲の頭の無音を自動で詰めました（再生範囲で戻せます）');
           autoCueCount = 0;
@@ -653,6 +722,16 @@
           };
           applyGainToCurrent(t);
         }, function () { /* 測れなくても補正なしで鳴らす */ });
+        // キーも一度だけ推定する（結果は保存する）
+        var keying = t.keyInfo || !window.PonKey ? null : function () {
+          return window.PonKey.analyze(buffer).then(function (r) {
+            if (!tracks.has(id)) return;
+            // 推定できなかった（ほぼ無音など）時も、推定し直さないよう印を残す
+            t.keyInfo = r ? { key: r.key, conf: r.confidence, segs: r.segments.map(function (sg) { return [sg.start, sg.key]; }) } : { key: null };
+            keyCount++;
+          }, function () { /* 推定できなくても再生には関係ない */ });
+        };
+        if (keying) measuring = measuring.then(keying);
         return measuring.then(function () {
           if (!tracks.has(id)) return;
         // 先読み対象の曲だけメモリに残す。それ以外は必要になった時に読み直す
@@ -1181,6 +1260,8 @@
       if (t.vocal && t.vocal.level < 0.995) titleCell.appendChild(cell('vocal-tag', 'Vo ' + Math.round(t.vocal.level * 100) + '%'));
       var gdb = trackGainDb(t);
       if (t.loud && Math.abs(gdb) >= 0.5) titleCell.appendChild(cell('gain-tag', fmtDb(gdb).replace(' ', '')));
+      var ks = keyShort(t);
+      if (ks) titleCell.appendChild(cell('key-tag', ks));
       if (markerUsable(t)) titleCell.appendChild(cell('marker-tag', '◆' + fmtShort(t.marker) + (t.markerDelay ? '+' + t.markerDelay + 's' : '')));
       titleCell.title = locked ? '' : 'ダブルクリックで曲名を変更';
 
@@ -1307,6 +1388,7 @@
     $('trimHeadAll').disabled = locked;
     $('alignAfter').disabled = locked;
     renderMarker(t);
+    renderKey(t);
     renderGain(t);
     renderVocal(t, state);
     renderCueEditor(t);
@@ -2035,6 +2117,13 @@
       if (t && current && current.trackId === t.id) setMarker(t, audio.position(current.voice));
     });
     $('markerClear').addEventListener('click', function (e) { e.currentTarget.blur(); setMarker(selectedTrack(), null); });
+    $('keySelect').addEventListener('change', function (e) {
+      var t = selectedTrack();
+      e.target.blur();
+      if (!t) return;
+      t.keyUser = e.target.value === '' ? null : Number(e.target.value);
+      afterChange();
+    });
     $('alignAfter').addEventListener('click', function (e) { e.currentTarget.blur(); alignAfterToCues(); });
     $('gainDown').addEventListener('click', function (e) { e.currentTarget.blur(); var t = selectedTrack(); if (t) setGainAdj(t, (t.gainAdj || 0) - 0.5); });
     $('gainUp').addEventListener('click', function (e) { e.currentTarget.blur(); var t = selectedTrack(); if (t) setGainAdj(t, (t.gainAdj || 0) + 0.5); });
@@ -2421,6 +2510,8 @@
       if (t.autoCue === 'pending') saved[t.id].autoCue = 'pending';
       if (t.vocal && t.vocalInfo) saved[t.id].vocalInfo = t.vocalInfo;
       if (t.marker != null) { saved[t.id].marker = t.marker; saved[t.id].markerDelay = t.markerDelay || 0; }
+      if (t.keyInfo) saved[t.id].keyInfo = t.keyInfo;
+      if (t.keyUser != null) saved[t.id].keyUser = t.keyUser;
     });
     return {
       id: show.id,
@@ -2552,7 +2643,9 @@
           autoCue: x.data.autoCue,
           vocalInfo: x.data.vocalInfo,
           marker: x.data.marker,
-          markerDelay: x.data.markerDelay
+          markerDelay: x.data.markerDelay,
+          keyInfo: x.data.keyInfo,
+          keyUser: x.data.keyUser
         });
       });
       syncOrder();

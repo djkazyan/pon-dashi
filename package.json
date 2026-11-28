@@ -1,14 +1,14 @@
 {
   "name": "pon-dashi",
   "productName": "ポン出し",
-  "version": "0.11.1",
+  "version": "0.12.0",
   "description": "音響現場用のポン出しソフト",
   "author": "HK SOUND",
   "private": true,
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "test": "node --test test/cue-engine.test.js test/backup.test.js test/version.test.js test/build.test.js",
+    "test": "node --test test/cue-engine.test.js test/backup.test.js test/version.test.js test/build.test.js test/key-detect.test.js",
     "build:mac": "electron-builder --mac --publish never",
     "build:win": "electron-builder --win --publish never"
   },

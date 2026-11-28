@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ポン出し</title>
-<link rel="stylesheet" href="style.css?v=0.11.1">
+<link rel="stylesheet" href="style.css?v=0.12.0">
 </head>
 <body>
 <div class="app" id="app">
@@ -12,7 +12,7 @@
   <header class="topbar">
     <div class="brand">
       <span class="brand-name">ポン出し</span>
-      <span class="brand-ver" id="appVersion" data-version="0.11.1">Ver. 0.11.1</span>
+      <span class="brand-ver" id="appVersion" data-version="0.12.0">Ver. 0.12.0</span>
       <button type="button" class="btn btn-small update-btn" id="updateBtn" hidden>新しい版があります</button>
       <input type="text" class="show-name" id="showName" aria-label="イベント名" maxlength="60" spellcheck="false">
       <button type="button" class="logo-btn" id="eventLogoBtn" title="イベントロゴ（映像出力で使う画像）を選ぶ" hidden><img id="eventLogoBtnImg" alt=""><span id="eventLogoBtnText">ロゴ</span></button>
@@ -122,6 +122,14 @@
       <div class="detail-label">選択中の曲</div>
       <div class="detail-title" id="detailTitle"></div>
       <dl class="detail-list" id="detailList"></dl>
+      <div class="detail-group key-box" id="keyBox">
+        <div class="detail-label">キー <span class="detail-hint">オートチューンの目安（自動で推定）</span></div>
+        <div class="key-main"><span class="key-name" id="keyName">—</span><span class="key-rel" id="keyRel"></span></div>
+        <div class="key-scale" id="keyScale"></div>
+        <ul class="key-segs" id="keySegs" hidden></ul>
+        <p class="key-note" id="keyNote" hidden></p>
+        <label class="key-fix"><span>違っていたら</span><select class="select select-small" id="keySelect" aria-label="キーを手で直す"></select></label>
+      </div>
       <div class="detail-group">
         <div class="detail-label">きっかけメモ <span class="detail-hint">種類は曲リストで選びます</span></div>
         <input type="text" class="cue-text" id="cueText" maxlength="60" placeholder="メモ（例：「ありがとう」のセリフで）" autocomplete="off">
@@ -452,10 +460,11 @@
   </div>
 </div>
 
-<script src="cue-engine.js?v=0.11.1"></script>
-<script src="store.js?v=0.11.1"></script>
-<script src="audio-engine.js?v=0.11.1"></script>
-<script src="backup.js?v=0.11.1"></script>
-<script src="app.js?v=0.11.1"></script>
+<script src="cue-engine.js?v=0.12.0"></script>
+<script src="store.js?v=0.12.0"></script>
+<script src="audio-engine.js?v=0.12.0"></script>
+<script src="backup.js?v=0.12.0"></script>
+<script src="key-detect.js?v=0.12.0"></script>
+<script src="app.js?v=0.12.0"></script>
 </body>
 </html>
